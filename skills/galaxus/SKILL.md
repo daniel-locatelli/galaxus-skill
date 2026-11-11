@@ -43,19 +43,21 @@ Paths below are relative to this file's directory, never the working directory.
   it or nl, else en. Pass it as `--lang`. Product types come back in that
   language ("Smartphones" / "Smartphone" / "Téléphone portable").
 - **Count first**: `<python> scripts/galaxus.py count "<query>" --min A --max B
-  --lang L`. A complete search needs about ceil(2 × count / 50) calls; the
-  budget is 60 (`--max-calls`), so count ≤ 1500. A bare category is usually far
-  over: `count smartphone --min 100 --max 300` = 43014, `"Android smartphone"`
-  in the same range = 1864 (2026-11-11). When the count is over budget, narrow
-  the query (brand, model or type words), narrow the price range, or ask the
-  user; raise `--max-calls` only when the user agrees.
+  --lang L` (without `--min`/`--max` it counts CHF 1–1,000,000, like
+  `search`). A complete search needs about ceil(3.5 × count / 50) + 2 calls;
+  the budget is 60 (`--max-calls`), so count ≤ about 800. A bare category is
+  usually far over: `count smartphone --min 100 --max 300` = 43014,
+  `"Android smartphone"` in the same range = 1864 (2026-11-11). When the count
+  is over budget, narrow the query (brand, model or type words), narrow the
+  price range, or ask the user; raise `--max-calls` (at most 300) only when
+  the user agrees.
 
 ## 3. Run (script path)
 
 Write `--out` files to a scratch/temp directory.
 
 ```bash
-# count "Samsung smartphone" --min 200 --max 500 = 611 (2026-11-11): about 25 calls, fits
+# count "Samsung smartphone" --min 200 --max 500 = 611 (2026-11-11): estimate 45 calls, fits (40 used live)
 <python> scripts/galaxus.py search "Samsung smartphone" --min 200 --max 500 --lang en --out <scratch>/phones.json
 <python> scripts/galaxus.py filter --from <scratch>/phones.json --type Smartphones --where "android_version>=15" --where "ram>=8"
 <python> scripts/galaxus.py compare --from <scratch>/phones.json --ids <id>,<id>   # ids from the --out file
@@ -70,9 +72,9 @@ Write `--out` files to a scratch/temp directory.
 |---|---|---|
 | `complete` | every match collected | report normally |
 | `partial` + `capped` bands | more than 50 products share a 1-CHF band (often cheap accessories: "Redmi 17" hits ~290 phone covers at CHF 19–23); integer prices cannot split it | search again with more specific terms, or with `--min` above the capped bands and tell the user the range is now CHF X+; or report the partial coverage as such |
-| `partial` + `uncovered` bands | call budget ran out | search again over a tighter range, or ask the user |
+| `partial` + `uncovered` bands | not fully searched (budget ran out, or a failure stopped the run); each band shows `(count unknown)` or `(N, up to 50 kept)` | search again over a tighter range, or ask the user |
 | `partial` + `drifted` bands | the Galaxus count changed between calls | relay them; those bands may be incomplete |
-| `infeasible` | too many matches for the budget (about 2 × matches / 50 calls > `--max-calls`); prints a price histogram, no product rows, exit 0 | narrow by brand in the query or a tighter price range, or ask the user, showing them the histogram |
+| `infeasible` | too many matches for the budget (estimate > `--max-calls`); prints a price histogram (`histogram incomplete: …` if it stopped early), no product rows, exit 0 | narrow by brand in the query or a tighter price range, or ask the user, showing them the histogram; the line names a `--max-calls` value when ≤ 300: use it only if the user agrees |
 | `failed` | Galaxus error or failure mid-run (exit 4) | report a **failed search, not zero results**, with the partial numbers |
 
 Relay every `Note:` line and every capped / drifted / uncovered band list to
@@ -95,17 +97,19 @@ excluded.` and a `Verdict:` line when nothing matches.
 
 **compare** builds a spec table for `--ids` from the file. For an id that is
 not in the file add `--lookup ID=BRAND NAME@PRICE` (price optional): it
-searches for that product near the price, best-effort, and prints a note when
-not found. Galaxus search does not find products by id.
+searches for that product near the price, best-effort (at most 20 lookups),
+and prints a note when not found; a Galaxus error prints `lookup failed` and
+exits 4. Galaxus search does not find products by id. A FILE written by
+another skill version gives a warning on stderr.
 
 **Exit codes**
 
 | Code | Meaning | What you do |
 |---|---|---|
 | 0 | ok, including `partial` and `infeasible` | read the coverage line |
-| 2 | endpoint unreachable on the first call | switch to the manual path |
-| 3 | invalid input (bad option, unknown field, `--min` > `--max`, input rejected by Galaxus, unreadable file) | fix the arguments |
-| 4 | Galaxus search error, failure mid-run, `--out` not writable at the end, or a `compare --lookup` transport failure | report a failed search with the partial report; stay on the script path (the manual path hits the same server) |
+| 2 | endpoint unreachable, or an unexpected response shape, on the first call | switch to the manual path |
+| 3 | invalid input (bad option, unknown field, `--min` > `--max`, `--max-calls` > 300, > 20 `--lookup`, `--out` is a directory, input rejected by Galaxus, unreadable or incomplete FILE) | fix the arguments |
+| 4 | Galaxus search error, failure or unexpected response mid-run, `--out` not writable at the end, or a failed `compare --lookup` | report a failed search with the partial report; stay on the script path (the manual path hits the same server) |
 
 ## 4. Report to the user
 

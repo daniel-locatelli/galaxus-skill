@@ -29,8 +29,9 @@ Leave `userIntent` out; it is optional and this skill never sends it.
    tool returns an error result, the search has *failed*. Stop, and report a
    failed search (not zero results) with the unique ids seen so far and the
    bands not searched. A band whose call failed is never done or empty.
-2. Gate: if `totalCount` > 500, do not split; ask the user to narrow (brand in
-   the query, tighter price range).
+2. Gate: a complete search needs about 3.5 × `totalCount` / 50 + 2 calls, so
+   with 20 calls: if `totalCount` > about 250, do not split; ask the user to
+   narrow (brand in the query, tighter price range).
 3. Keep a list of bands to do and a set of product ids seen.
 4. A band `[a, b]` is done when `totalCount` ≤ 50 and all its products came
    back. Otherwise take the median of the returned

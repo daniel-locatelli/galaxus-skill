@@ -4,6 +4,11 @@ Only with a real browser tool (e.g. Claude in Chrome), and only for the final
 shortlist (max 5 products). Galaxus pages answer plain HTTP fetches with 403,
 so without a real browser every field is *blocked*.
 
+Open a `pageUrl` only when its host is `galaxus.ch` or a subdomain of it
+(`www.galaxus.ch`); skip any other link, even one that looks related, and
+label its fields *not checked*. The same host rule applies to any link you
+follow from the page.
+
 Per product page (`pageUrl`), read the page **text** (not screenshots) and
 extract:
 

@@ -4,19 +4,24 @@ Run each prompt 3 times **with** the skill and 3 times **without** it (fresh
 session each). Record the transcript path and pass/fail per criterion.
 
 Counts below were measured with `galaxus.py count` on 2026-11-11 and drift
-over time; re-run `count` before judging a run. A complete search needs about
-ceil(2 x count / 50) calls against a budget of 60, so it fits up to about 1500
-matches.
+over time; re-run `count` before judging a run. The script estimates a
+complete search at ceil(3.5 x count / 50) + 2 calls against a budget of 60, so
+it fits up to about 800 matches (live: 611 matches took 40 calls; 959 ran out
+at 60).
 
 ## Cases
 
 1. "Find me a Samsung smartphone with at least 8 GB RAM and Android 15 or
    newer, between 200 and 500 CHF on Galaxus."
-   Feasible: `count "Samsung smartphone" --min 200 --max 500` = 611.
+   Feasible: `count "Samsung smartphone" --min 200 --max 500` = 611
+   (estimate 45 calls; 40 used live).
 2. "I want a 27-inch monitor with at least 144 Hz for under 250 CHF from Galaxus."
-   Feasible: `count "monitor 27 inch" --min 100 --max 250` = 960 (about 40
-   calls). The user gave no lower bound; any lower bound the agent chooses
-   must be stated.
+   Over budget at the default 60: `count "monitor 27 inch" --min 100 --max
+   250` = 959 (estimate 70 calls, `infeasible`). Narrowed: `--min 150 --max
+   250` = 541 (estimate 40, feasible). A good run counts first, then narrows
+   (a stated lower bound such as CHF 150, or a brand) or asks the user before
+   using `--max-calls 70`. The user gave no lower bound; any lower bound the
+   agent chooses must be stated.
 3. "Find me an Android 17 smartphone under 300 CHF on Galaxus."
    Deliberately infeasible as a bare category: `count smartphone --min 100
    --max 300` = 43014. A good run counts first, then narrows (brand, price) or
@@ -51,7 +56,9 @@ covered offline by `tests/test_cli.py`:
   except where the user names a model (cases 3 and 5, see their notes).
 - Case 1: matches use the script's `filter`; products with unknown OS or RAM
   are listed as candidates, not dropped (n/a if none are unknown).
-- Case 2: the answer reports how many products had unknown refresh rate.
+- Case 2: the run does not search 100-250 at the default budget without
+  narrowing or the user's agreement; the answer states the price range
+  actually searched and reports how many products had unknown refresh rate.
 - Case 3: the answer reports infeasibility (or partial coverage) and offers
   ways to narrow (brand, price range) instead of listing a few products.
   If it finds an Android 17 phone under 300 CHF, check by hand on galaxus.ch

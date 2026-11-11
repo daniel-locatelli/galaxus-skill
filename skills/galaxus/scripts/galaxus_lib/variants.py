@@ -1,13 +1,15 @@
 """Conservative variant merge: one row only when brand, productType, name,
-description and refurbished flag are all equal. Merging different products shows false facts; extra
-rows only cost space. Fuzzy de-duplication is deferred."""
+description and refurbished flag are all equal. Merging different products
+shows false facts; extra rows only cost space. Fuzzy de-duplication is deferred."""
 from __future__ import annotations
 
 
 def is_refurbished(p: dict) -> bool:
     extras = p.get("extras")
     labels = extras.get("labels") if isinstance(extras, dict) else None
-    return "offertype=refurbished" in (p.get("pageUrl") or "") or         (isinstance(labels, (list, tuple)) and "USED_AND_CHECKED" in labels)
+    if "offertype=refurbished" in (p.get("pageUrl") or ""):
+        return True
+    return isinstance(labels, (list, tuple)) and "USED_AND_CHECKED" in labels
 
 
 def variant_key(p: dict) -> tuple:

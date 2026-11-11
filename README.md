@@ -1,7 +1,7 @@
 # galaxus-skill
 
 An agent skill for **exhaustive** product search on [Galaxus](https://www.galaxus.ch)
-through its official MCP endpoint (`https://mcp.galaxus.ch/`, see the announcement (link from the design spec):
+through its official MCP endpoint (`https://mcp.galaxus.ch/`; Galaxus announcement:
 <https://www.galaxus.ch/en/page/galaxus-introduces-mcp-interface-for-ai-assistants-44216>).
 
 Status: version 0.1.0, local development. The repository is not published yet;
@@ -49,10 +49,15 @@ Optional, only for the manual fallback (when Python cannot run):
 ### claude.ai
 
 Zip the `skills/galaxus/` folder and upload it as a skill (see the claude.ai
-help on skills for the current menu path). Add `https://mcp.galaxus.ch/` as a
-custom connector for the manual path. Unverified: whether the code-execution
-sandbox can reach `mcp.galaxus.ch`. If it cannot, the script exits 2 and the
-skill falls back to the connector (manual path).
+help on skills for the current menu path). Build the zip from git, so no
+`__pycache__/` or other untracked files end up in it:
+
+    git archive --format=zip --prefix=galaxus/ -o galaxus.zip HEAD:skills/galaxus
+
+Add `https://mcp.galaxus.ch/` as a custom connector for the manual path.
+Unverified: whether the code-execution sandbox can reach `mcp.galaxus.ch`. If
+it cannot, the script exits 2 and the skill falls back to the connector
+(manual path).
 
 ### Codex and other MCP clients
 
@@ -72,7 +77,7 @@ saved file.
 Subcommands: `count`, `search`, `filter`, `compare` (`<sub> --help` lists
 flags). Prices are integer CHF, inclusive; languages `en de fr it nl`.
 
-    # one call: how many matches? (a complete search needs about 2 x count / 50 calls; budget 60)
+    # one call: how many matches? (a complete search needs about 3.5 x count / 50 + 2 calls; budget 60, so up to ~800)
     python3 skills/galaxus/scripts/galaxus.py count "Samsung smartphone" --min 200 --max 500
 
     # exhaustive search, full result kept in a file
@@ -106,7 +111,9 @@ results).
 ## Fair use
 
 Calls are sequential with a 0.2 s delay and a default budget of 60 calls per
-search; `agentInfo` identifies the skill as `galaxus-skill/<version>`.
+search (`--max-calls` at most 300; `compare` at most 20 lookups); a server
+`Retry-After` is honoured up to 30 s. `agentInfo` identifies the skill as
+`galaxus-skill/<version>`.
 
 ## Open items
 
