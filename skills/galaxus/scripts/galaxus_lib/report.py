@@ -50,16 +50,24 @@ def _price_key(p: dict):
 
 # --------------------------------------------------------------- document
 
+def enrich_product(p: dict, extras, lang: str, cache: dict | None = None) -> dict:
+    """Document form of a raw product: a copy with `extras` and extracted `specs` (cached by id)."""
+    pid = p.get("id")
+    if cache is not None and pid in cache:
+        extracted = cache[pid]
+    else:
+        extracted = {f: s.to_dict() for f, s in specs.extract(p, lang).items()}
+        if cache is not None:
+            cache[pid] = extracted
+    item = dict(p)
+    item["extras"] = extras
+    item["specs"] = extracted
+    return item
+
+
 def build_document(res, query: str, lang: str, version: str, timestamp: str, cache: dict | None = None) -> dict:
     cache = {} if cache is None else cache
-    products = []
-    for pid, p in res.products.items():
-        if pid not in cache:
-            cache[pid] = {f: s.to_dict() for f, s in specs.extract(p, lang).items()}
-        item = dict(p)
-        item["extras"] = res.extras.get(pid)
-        item["specs"] = cache[pid]
-        products.append(item)
+    products = [enrich_product(p, res.extras.get(pid), lang, cache) for pid, p in res.products.items()]
     products.sort(key=_price_key)
     return {
         "version": version, "query": query, "language": lang, "range": [res.lo, res.hi], "timestamp": timestamp,

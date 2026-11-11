@@ -14,11 +14,17 @@ def parse_lookup(text: str) -> tuple[int, tuple[str, float | None]]:
     if "=" not in text:
         raise ValueError(f"--lookup {text!r}: expected ID=BRAND NAME[@PRICE]")
     pid, rest = text.split("=", 1)
+    if not pid.strip().isdigit():
+        raise ValueError(f"--lookup {text!r}: the id must be numeric, got {pid.strip()!r}")
     query, _, price = rest.rpartition("@") if "@" in rest else (rest, "", "")
-    return int(pid), (query.strip(), float(price) if price else None)
+    try:
+        amount = float(price) if price else None
+    except ValueError:
+        raise ValueError(f"--lookup {text!r}: the price after @ must be a number") from None
+    return int(pid), (query.strip(), amount)
 
 
-def lookup(fetch_for_query, pid: int, query: str, price: float | None) -> dict | None:
+def lookup(fetch_for_query, pid: int, query: str, price: float | None, lang: str = "en") -> dict | None:
     fetch = fetch_for_query(query)
     bands = [(None, None)]
     if price:
@@ -29,9 +35,7 @@ def lookup(fetch_for_query, pid: int, query: str, price: float | None) -> dict |
         page = fetch(lo, hi, 50)
         for p in page.products:
             if p.get("id") == pid:
-                item = dict(p)
-                item["extras"] = page.extras.get(pid)
-                return item
+                return report.enrich_product(p, page.extras.get(pid), lang)
     return None
 
 

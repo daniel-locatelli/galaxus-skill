@@ -5,6 +5,8 @@ unknown (missing value, conflict, or a ceiling that cannot decide), else matches
 """
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass, field
 
 from . import report, specs
@@ -12,7 +14,8 @@ from .variants import merge_variants
 
 MATCH, FAIL, UNKNOWN = "match", "fail", "unknown"
 _OPS = (">=", "<=", "~", "=")
-_SIZE_FIELDS = ("storage", "ram")  # numeric conditions on these are in GB
+_SIZE_FIELDS = ("storage", "ram")  # numeric conditions on these are in GB (TB = 1000 GB, as in specs)
+_COMMA_NUMBER = re.compile(r"\d+,\d+")
 
 
 @dataclass(frozen=True)
@@ -30,24 +33,39 @@ class Outcome:
     unknown_by_field: dict = field(default_factory=dict)
     type_excluded: dict = field(default_factory=dict)
     checked: int = 0
+    inferred: int = 0  # matches that rely on an inferred value for a condition field
+
+
+def _as_float(text: str) -> float | None:
+    try:
+        n = float(text)
+    except ValueError:
+        return None
+    return n if math.isfinite(n) else None
 
 
 def parse_where(expr: str) -> Condition:
+    usage = f"cannot parse --where {expr!r}; use FIELD=VALUE, FIELD~TEXT, FIELD>=N or FIELD<=N"
     for op in _OPS:
         if op in expr:
             name, value = (part.strip() for part in expr.split(op, 1))
-            if name and value:
-                if op in (">=", "<="):
-                    float(value)  # raises ValueError for non-numbers
-                return Condition(name, op, value)
-            break
-    raise ValueError(f"cannot parse --where {expr!r}; use FIELD=VALUE, FIELD~TEXT, FIELD>=N or FIELD<=N")
+            if not name or not value or any(ch in name for ch in "<>=~"):
+                break
+            name = name.lower()
+            if name not in specs.FIELD_ORDER:
+                raise ValueError(f"unknown field {name!r}; valid fields: {', '.join(specs.FIELD_ORDER)}")
+            if op != "~" and _COMMA_NUMBER.fullmatch(value):
+                value = value.replace(",", ".")
+            if op in (">=", "<=") and _as_float(value) is None:
+                raise ValueError(f"{usage}; {op} needs a finite number")
+            return Condition(name, op, value)
+    raise ValueError(usage)
 
 
 def _number(cond: Condition, value: str) -> float | None:
     number = specs.first_number(value)
-    if number is not None and cond.field in _SIZE_FIELDS and "tb" in value.lower():
-        number *= 1024  # compare storage/RAM in GB
+    if number is not None and cond.field in _SIZE_FIELDS and re.search(r"\bTB\b", value, re.I):
+        number *= 1000  # compare storage/RAM in GB
     return number
 
 
@@ -67,6 +85,12 @@ def evaluate(cond: Condition, spec: dict | None) -> str:
     if spec.get("ceiling"):
         return UNKNOWN
     if cond.op == "=":
+        want_number = _as_float(cond.value)
+        if want_number is not None:
+            number = _number(cond, value)
+            if number is None:
+                return UNKNOWN
+            return MATCH if number == want_number else FAIL
         return MATCH if value.strip().lower() == cond.value.lower() else FAIL
     return MATCH if cond.value.lower() in value.lower() else FAIL
 
@@ -91,6 +115,8 @@ def run_filter(doc: dict, conditions: list[Condition], types=()) -> Outcome:
                     out.unknown_by_field[c.field] = out.unknown_by_field.get(c.field, 0) + 1
         else:
             out.matched.append(p)
+            if any(((p.get("specs") or {}).get(c.field) or {}).get("state") == "inferred" for c in conditions):
+                out.inferred += 1
     return out
 
 
@@ -104,7 +130,16 @@ def format_filter_report(doc: dict, outcome: Outcome, conditions: list[Condition
     detail = f" ({unknown})" if unknown else ""
     lines.append(f"Filter {criteria}: {outcome.checked} checked, {len(outcome.matched)} match, "
                  f"{len(outcome.unknown)} unknown{detail}, {outcome.excluded} excluded.")
-    if not outcome.matched:
+    if outcome.checked == 0:
+        counts: dict[str, int] = {}
+        for p in doc["products"]:
+            t = p.get("productType") or "(no type)"
+            counts[t] = counts.get(t, 0) + 1
+        excluded = sum(outcome.type_excluded.values())
+        available = ", ".join(f"{t} ({n})" for t, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+        lines.append(f"Verdict: 0 products checked; the type filter excluded {excluded}. "
+                     f"Available product types: {available or 'none'}.")
+    elif not outcome.matched:
         if doc["status"] == "complete" and not outcome.unknown:
             lines.append("Verdict: none qualify (coverage complete and the specs are known for every candidate).")
         else:
@@ -114,6 +149,8 @@ def format_filter_report(doc: dict, outcome: Outcome, conditions: list[Condition
             if outcome.unknown:
                 reasons.append(f"{len(outcome.unknown)} have unknown specs ({unknown})")
             lines.append(f"Verdict: none confirmed among {outcome.checked} checked; " + "; ".join(reasons) + ".")
+    if outcome.matched and outcome.inferred:
+        lines.append(f"{outcome.inferred} of them rely on inferred values for a condition field.")
     for title, items in (("Matches", outcome.matched), ("Unknown (could qualify)", outcome.unknown)):
         if not items:
             continue
