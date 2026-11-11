@@ -13,6 +13,18 @@ from typing import Callable, Optional
 
 PAGE_SIZE = 50
 HISTOGRAM_CALLS = 8
+# Calls per page-full of matches, calibrated 2026-11-11 against FakeCatalogue runs
+# (shuffled = relevance order as seen live; uniform and 35 % clustered at x49/x99/x00
+# prices; 200-1500 matches): worst case 3.5 x N / 50 calls (400 -> 28, 611 -> 40,
+# 1500 -> 106). Live: 611 matches took 40 calls; 959 ran out at 60. The + 2 covers the
+# unfiltered-total and final re-count calls. Price-sorted pages (not seen live) need ~4.
+CALLS_PER_PAGE = 3.5
+EXTRA_CALLS = 2
+MAX_CALLS_CAP = 300  # --max-calls upper bound (fair use)
+
+
+def estimate_calls(total: int) -> int:
+    return math.ceil(CALLS_PER_PAGE * total / PAGE_SIZE) + EXTRA_CALLS
 FULL_RANGE = (1, 1_000_000)
 
 
@@ -63,7 +75,12 @@ class SearchFailed(Exception):
 
 def split_point(lo: int, hi: int, products: list) -> int:
     """Median of the returned prices, else the geometric mean; clamped to lo < m < hi."""
-    prices = [p["priceIfAvailable"]["amountInclusive"] for p in products if p.get("priceIfAvailable")]
+    prices = []
+    for p in products:
+        price = p.get("priceIfAvailable") if isinstance(p, dict) else None
+        amount = price.get("amountInclusive") if isinstance(price, dict) else None
+        if isinstance(amount, (int, float)) and not isinstance(amount, bool) and math.isfinite(amount):
+            prices.append(amount)
     m = round(statistics.median(prices)) if prices else round(math.sqrt(lo * hi))
     return min(max(m, lo + 1), hi - 1)
 
@@ -100,7 +117,7 @@ def search(fetch: Fetch, lo: int = 1, hi: int = 1_000_000, max_calls: int = 60,
         fail(root.error)
     collect(root)
 
-    res.estimated_calls = math.ceil(2 * root.total / PAGE_SIZE)
+    res.estimated_calls = estimate_calls(root.total)
     if res.estimated_calls > max_calls:
         res.status = "infeasible"
         _histogram(call, res)
@@ -136,7 +153,8 @@ def _split(call, collect, fail, notify, res: SearchResult, root: Page) -> None:
         _split_loop(call, collect, fail, res, pending)
     except Exception:
         # mid-run failure: the in-flight band and everything pending is unsearched
-        res.bands.extend(Band(a, b, None, "uncovered") for a, b, _ in pending)
+        # a band fetched but not split keeps its count (up to 50 of it were collected)
+        res.bands.extend(Band(a, b, page.total if page else None, "uncovered") for a, b, page in pending)
         res.bands.sort(key=lambda band: (band.lo, band.hi))
         notify()  # checkpoint again so it carries the uncovered bands
         raise
@@ -156,19 +174,22 @@ def _split_loop(call, collect, fail, res: SearchResult, pending: list) -> None:
             if page.error:
                 fail(page.error)
             collect(page)
-        pending.pop(0)
+            pending[0] = (a, b, page)
         can_split = b - a > 1 and res.calls < res.max_calls
         if page.total <= PAGE_SIZE and len(page.products) == page.total:
-            res.bands.append(Band(a, b, page.total, "complete"))
+            outcome = Band(a, b, page.total, "complete")
         elif can_split:
-            m = split_point(a, b, page.products)
-            pending[0:0] = [(a, m, None), (m, b, None)]  # ascending order, left first
+            m = split_point(a, b, page.products)  # may raise: the band is still pending
+            pending[0:1] = [(a, m, None), (m, b, None)]  # ascending order, left first
+            continue
         elif page.total <= PAGE_SIZE:
-            res.bands.append(Band(a, b, page.total, "drifted"))
+            outcome = Band(a, b, page.total, "drifted")
         elif b - a <= 1:
-            res.bands.append(Band(a, b, page.total, "capped"))
+            outcome = Band(a, b, page.total, "capped")
         else:
-            res.bands.append(Band(a, b, page.total, "uncovered"))
+            outcome = Band(a, b, page.total, "uncovered")
+        pending.pop(0)
+        res.bands.append(outcome)
 
 
 def _histogram(call, res: SearchResult) -> None:

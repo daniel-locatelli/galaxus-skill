@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from . import specs
+from .search import MAX_CALLS_CAP
 from .variants import is_refurbished, merge_variants
 
 FOOTNOTE = ("* availability class and discount: per Galaxus data (undocumented field); classes are shown raw, "
@@ -81,17 +82,33 @@ def build_document(res, query: str, lang: str, version: str, timestamp: str, cac
 
 # --------------------------------------------------------------- coverage
 
+def _band_count(band: dict) -> str:
+    n = _num(band.get("count"))
+    if n is None:
+        return "(count unknown)"
+    if band["status"] == "uncovered":  # fetched once, never split
+        return f"({n:,}, up to 50 kept)"
+    return f"({n:,})"
+
+
 def coverage_lines(doc: dict) -> list[str]:
     n, total, status = len(doc["products"]), doc.get("rootTotal"), doc["status"]
     calls = _count(doc.get("calls"))
     lines = []
     if status == "infeasible":
+        estimate = _num(doc.get("estimatedCalls"))
+        if estimate is not None and estimate <= MAX_CALLS_CAP:
+            more = f" With the user's agreement, rerun with --max-calls {_count(estimate)}."
+        else:
+            more = f" Raising --max-calls does not help (it is capped at {MAX_CALLS_CAP})."
         lines.append(f"Coverage: infeasible. Galaxus reports {_count(total)} matches; a complete search needs about "
-                     f"{_count(doc.get('estimatedCalls'))} calls, budget is {_count(doc.get('maxCalls'))}. "
-                     f"Narrow by brand in the query, by a tighter price range, or ask the user.")
+                     f"{_count(estimate)} calls, budget is {_count(doc.get('maxCalls'))}. "
+                     f"Narrow by brand in the query, by a tighter price range, or ask the user.{more}")
         if doc["histogram"]:
             lines.append("Price histogram (CHF range: matches):")
             lines += [f"  {b['lo']}-{b['hi']}: {_count(b['count'])}" for b in doc["histogram"]]
+        if doc.get("error"):
+            lines.append(f"  histogram incomplete: {doc['error']}")
     elif status == "complete":
         if _num(total) is None:
             lines.append(f"Coverage: complete. {n} unique products found; Galaxus did not report a total for "
@@ -107,13 +124,10 @@ def coverage_lines(doc: dict) -> list[str]:
         lines.append(f"Coverage: {word}. {n} unique products found of {_count(total)} reported ({calls} calls).")
     for st, why in (("capped", "more than 50 products within 1 CHF; 50 kept"),
                     ("drifted", "count changed between calls"),
-                    ("uncovered", "call budget reached; not searched")):
+                    ("uncovered", "not fully searched (budget or failure)")):
         bands = [b for b in doc["bands"] if b["status"] == st]
         if bands:
-            lines.append(f"  {st} ({why}): " + ", ".join(
-                f"{b['lo']}-{b['hi']} CHF" + (f" ({b['count']})" if b["count"] is not None
-                                              else " (count unknown)" if st == "drifted" else "")
-                for b in bands))
+            lines.append(f"  {st} ({why}): " + ", ".join(f"{b['lo']}-{b['hi']} CHF {_band_count(b)}" for b in bands))
     final, unfiltered = _num(doc.get("finalTotal")), _num(doc.get("unfilteredTotal"))
     total_n = _num(total)
     if final is not None and total_n is not None and final != total_n:

@@ -51,11 +51,11 @@ def test_more_than_50_at_one_price_is_capped():
 
 
 def test_budget_leaves_uncovered_bands():
-    fake = catalogue([float(p) for p in range(1, 281)], order="asc")
-    res = search(fake, max_calls=12)
-    assert res.estimated_calls <= 12  # the gate did not fire
+    fake = catalogue([float(p) for p in range(1, 401)], order="asc")  # price-sorted pages: worst case
+    res = search(fake, max_calls=30)
+    assert res.estimated_calls <= 30  # the gate did not fire
     assert res.status == "partial"
-    assert res.calls == 12
+    assert res.calls == 30
     assert any(b.status == "uncovered" for b in res.bands)
 
 
@@ -83,7 +83,7 @@ def test_feasibility_gate_returns_histogram():
 
     res = search(huge)
     assert res.status == "infeasible"
-    assert res.estimated_calls == 18_872
+    assert res.estimated_calls == 33_028  # ceil(3.5 * 471_800 / 50) + 2
     assert len(res.histogram) == 8
     assert res.histogram[0].lo == 1 and res.histogram[-1].hi == 1_000_000
     assert res.calls == 9
@@ -217,3 +217,57 @@ def test_last_checkpoint_after_failure_matches_partial_bands():
     with pytest.raises(SearchFailed) as info:
         search(fake, lo=1, hi=1000, on_update=lambda r: snaps.append(list(r.bands)))
     assert snaps[-1] == info.value.partial.bands
+
+
+def test_estimate_marks_959_infeasible_and_611_feasible_at_60():
+    def fixed(total):
+        def fetch(lo, hi, first):
+            return Page(total=total, products=[make_product(i, 200.0 + i) for i in range(min(first, 50))])
+        return fetch
+    assert search(fixed(959)).status == "infeasible"
+    assert search(fixed(959)).estimated_calls == 70
+    res = search(fixed(611), max_calls=60)
+    assert res.estimated_calls == 45 and res.status != "infeasible"
+
+
+def clustered_prices(n, lo, hi, rng, share=0.35):
+    points = [p for p in range(lo, hi + 1) if p % 50 in (0, 49) or p % 100 == 99]
+    out = []
+    for _ in range(n):
+        if rng.random() < share:
+            p = rng.choice(points) + rng.choice([0, 0, 0.9, 0.95, -0.1])
+        else:
+            p = rng.uniform(lo, hi)
+        out.append(round(min(max(p, lo), hi), 2))
+    return out
+
+
+@pytest.mark.parametrize("n,lo,hi", [(200, 200, 500), (611, 200, 500), (959, 100, 250)])
+@pytest.mark.parametrize("seed", range(3))
+def test_estimate_covers_simulated_runs_with_clustered_prices(n, lo, hi, seed):
+    """Calibration guard for estimated_calls (relevance order = shuffled prices, as live)."""
+    prices = clustered_prices(n, lo, hi, random.Random(seed))
+    res = search(catalogue(prices, seed=seed), lo, hi, max_calls=10_000)
+    assert res.calls <= res.estimated_calls
+
+
+def test_split_point_skips_malformed_prices():
+    bad = [make_product(1, 10.0), make_product(2, 30.0), make_product(3, 20.0)]
+    bad[1]["priceIfAvailable"] = {"currency": "CHF"}
+    bad[2]["priceIfAvailable"] = {"amountInclusive": "n/a"}
+    assert split_point(1, 1000, bad) == 10
+    assert split_point(1, 100, [dict(make_product(4, None), priceIfAvailable="?")]) == 10
+
+
+def test_band_is_kept_in_partial_when_split_fails(monkeypatch):
+    from galaxus_lib import search as searchmod
+
+    def boom(lo, hi, products):
+        raise RuntimeError("split failed")
+    monkeypatch.setattr(searchmod, "split_point", boom)
+    fake = catalogue([float(p) for p in range(1, 121)])
+    with pytest.raises(SearchFailed) as info:
+        search(fake, lo=1, hi=1000)
+    bands = info.value.partial.bands
+    assert [(b.lo, b.hi, b.status) for b in bands] == [(1, 1000, "uncovered")]
+    assert bands[0].count == 120  # fetched, not split: count known, up to 50 kept

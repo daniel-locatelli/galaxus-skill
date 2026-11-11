@@ -59,7 +59,7 @@ def test_coverage_partial_lists_band_problems():
     text = "\n".join(report.coverage_lines(d))
     assert text.startswith("Coverage: partial. 0 unique products found of 400 reported")
     assert "capped (more than 50 products within 1 CHF; 50 kept): 163-164 CHF (165)" in text
-    assert "uncovered (call budget reached; not searched): 500-1000000 CHF" in text
+    assert "uncovered (not fully searched (budget or failure)): 500-1000000 CHF (count unknown)" in text
 
 
 def test_coverage_infeasible_shows_histogram_and_no_rows():
@@ -213,3 +213,33 @@ def test_row_omits_missing_or_empty_rating():
     p["ratingSummaryIfAvailable"] = {"averageRating": 4.5, "ratingCount": 12}
     p["specs"] = {}
     assert "rating 4.5 (12)" in report.format_row([p])
+
+
+def test_uncovered_band_labels():
+    d = doc([], status="partial", rootTotal=400, bands=[
+        {"lo": 100, "hi": 200, "count": 120, "status": "uncovered"},
+        {"lo": 236, "hi": 250, "count": None, "status": "uncovered"}])
+    text = "\n".join(report.coverage_lines(d))
+    assert "100-200 CHF (120, up to 50 kept)" in text
+    assert "236-250 CHF (count unknown)" in text
+    assert "call budget reached" not in text
+
+
+def test_capped_band_with_unknown_count_says_so():
+    d = doc([], status="partial", bands=[{"lo": 5, "hi": 6, "count": None, "status": "capped"}])
+    assert "5-6 CHF (count unknown)" in "\n".join(report.coverage_lines(d))
+
+
+def test_infeasible_suggests_a_capped_max_calls():
+    d = doc([], status="infeasible", rootTotal=959, estimatedCalls=70)
+    text = "\n".join(report.coverage_lines(d))
+    assert "--max-calls 70" in text
+    big = doc([], status="infeasible", rootTotal=471_800, estimatedCalls=33_028)
+    t = "\n".join(report.coverage_lines(big))
+    assert "--max-calls 33" not in t and "300" in t
+
+
+def test_infeasible_with_histogram_error_says_incomplete():
+    d = doc([], status="infeasible", rootTotal=959, estimatedCalls=70, error="boom",
+            histogram=[{"lo": 1, "hi": 6, "count": 3, "status": "histogram"}])
+    assert "histogram incomplete: boom" in "\n".join(report.coverage_lines(d))
