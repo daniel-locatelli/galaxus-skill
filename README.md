@@ -4,8 +4,7 @@ An agent skill for **exhaustive** product search on [Galaxus](https://www.galaxu
 through its official MCP endpoint (`https://mcp.galaxus.ch/`; Galaxus announcement:
 <https://www.galaxus.ch/en/page/galaxus-introduces-mcp-interface-for-ai-assistants-44216>).
 
-Status: version 0.1.0, local development. The repository is not published yet;
-the GitHub URL below is the planned one.
+Status: version 0.1.0, early release. See "Open items" below.
 
 The endpoint has one tool, `search_products`. It returns at most 50 products
 per call, with no pagination, sort or spec filters. Asked "is there an Android
@@ -22,8 +21,6 @@ answers "no". This skill:
 
 ## Install
 
-Planned repository: `daniel-locatelli/galaxus-skill` on GitHub (not live yet).
-
 ### Claude Code
 
     /plugin marketplace add daniel-locatelli/galaxus-skill
@@ -34,7 +31,7 @@ or, from a shell:
     claude plugin marketplace add daniel-locatelli/galaxus-skill
     claude plugin install galaxus@galaxus-skill
 
-Until the repository is published, add the local checkout as the marketplace:
+To try a local checkout instead:
 
     /plugin marketplace add <path to checkout>
     /plugin install galaxus@galaxus-skill
