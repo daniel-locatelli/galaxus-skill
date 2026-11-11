@@ -61,7 +61,7 @@ def test_unknown_type_uses_generic_patterns_only():
 @pytest.mark.parametrize("ptype, schema", [
     ("Smartphone-Hüllen", None), ("Notebook bags", None), ("Monitor mounts", None),
     ("Protection d'écran", None), ("Ordinateurs portables", "laptop"),
-    ("Portatili", "laptop"), ("Notebooks", "laptop"), ("Laptops", "laptop"),
+    ("Portatili", None), ("Notebooks", "laptop"), ("Laptops", "laptop"),
     ("Smartphones", "phone"), ("Handys", "phone"), ("Monitore", "monitor"),
     ("Moniteurs", "monitor"), ("Smartphone", "phone"), ("Monitor", "monitor"),
 ])
@@ -102,3 +102,39 @@ def test_first_number_uses_language_aware_parsing():
 def test_parse_number_mixed_separators():
     assert specs.parse_number("1,234.56", "en") == 1234.56
     assert specs.parse_number("1.234,56", "de") == 1234.56
+
+
+# ---- fix round 2
+
+@pytest.mark.parametrize("ptype, schema", [
+    ("Notebooks", "laptop"), ("Notebook", "laptop"), ("Ordinateur portable", "laptop"),
+    ("Monitor", "monitor"), ("Moniteur", "monitor"),
+    ("Smartphones", "phone"), ("Smartphone", "phone"), ("Téléphone portable", "phone"),
+    ("  notebooks ", "laptop"), ("Laptop", "laptop"), ("Laptops", "laptop"),
+    ("Monitors", "monitor"), ("Monitore", "monitor"), ("Moniteurs", "monitor"),
+    ("Ordinateurs portables", "laptop"), ("Téléphones portables", "phone"),
+    ("Handy", "phone"), ("Handys", "phone"),
+    ("Smartphone-Schutzfolien", None), ("Zubehör für Notebooks", None),
+    ("Housses pour ordinateurs portables", None), ("Smartphone-Hüllen", None),
+    ("Notebook bags", None), ("Monitor mounts", None), ("", None),
+])
+def test_schema_for_exact_allow_list(ptype, schema):
+    assert specs.schema_for(ptype) == schema
+
+
+def test_laptop_two_sizes_ram_must_be_clearly_smaller():
+    out = specs.parse_properties("128 GB, 256 GB", "Notebooks")
+    assert "ram" not in out and "storage" not in out
+    out = specs.parse_properties("64 GB, 128 GB", "Notebooks")
+    assert out["ram"] == "64 GB" and out["storage"] == "128 GB"
+    out = specs.parse_properties("16 GB, 512 GB", "Notebooks")
+    assert out["ram"] == "16 GB" and out["storage"] == "512 GB"
+
+
+def test_phone_colour_skips_feature_tokens_and_caps_at_two():
+    out = specs.parse_properties('256 GB, Black, Bluetooth, USB-C, 6.1"', "Smartphones")
+    assert out["colour"] == "Black"
+    out = specs.parse_properties('256 GB, Black, GPS, Android, iOS, Wi-Fi 6', "Smartphones")
+    assert out["colour"] == "Black"
+    out = specs.parse_properties('256 GB, Black, Schwarz, Noir', "Smartphones")
+    assert out["colour"] == "Black / Schwarz"

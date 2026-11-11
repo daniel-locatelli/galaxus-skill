@@ -75,27 +75,23 @@ SCHEMAS = {
     "laptop": ("screen", "storage", "ram", "keyboard", "cpu"),
     "monitor": ("resolution", "screen"),
 }
-_TYPE_WORDS = (
-    ("phone", r"smartphones?|handys?|handies|téléphones?|telefono|telefoni|telefoon|telefoons"),
-    ("laptop", r"notebooks?|laptops?|portatil[ei]|ordinateurs? portables?"),
-    ("monitor", r"monitor[es]?|monitors|moniteurs?|écrans?"),
-)
-# Accessory words: a type containing one of these is never a device type.
-_ACCESSORY = re.compile(
-    r"(?<!\w)(?:hülle|huelle|case|cover|tasche|bag|sleeve|halter|halterung|mount|stand|"
-    r"schutz|protection|protector|folie|glass|kabel|cable|adapter|charger|ladegerät)"
-    r"(?:s|n|en|e)?(?!\w)")
-_NON_COLOUR = re.compile(r"^(?:wi-?fi|wlan|lte|nfc|esim|dual sim|single sim|5g|4g)$", re.I)
+# Exact allow-list of productType values (probed live 2026-11-11, all languages).
+# Anything else, accessories included, is generic: unknown beats wrong.
+_TYPES = {
+    "laptop": ("notebooks", "notebook", "ordinateur portable", "ordinateurs portables",
+               "laptop", "laptops"),
+    "monitor": ("monitor", "monitors", "monitore", "moniteur", "moniteurs"),
+    "phone": ("smartphones", "smartphone", "téléphone portable", "téléphones portables",
+              "handy", "handys"),
+}
+_TYPE_LOOKUP = {w: schema for schema, words in _TYPES.items() for w in words}
+_NON_COLOUR = re.compile(
+    r"^(?:wi-?fi.*|wlan.*|lte|nfc|esim|dual sim|single sim|5g|4g|bluetooth.*|usb.*|gps|"
+    r"android.*|ios.*)$", re.I)
 
 
 def schema_for(product_type: str) -> str | None:
-    t = product_type.lower().replace(" ", " ")
-    if _ACCESSORY.search(t):
-        return None
-    for schema, words in _TYPE_WORDS:
-        if re.search(rf"(?<!\w)(?:{words})(?!\w)", t):
-            return schema
-    return None
+    return _TYPE_LOOKUP.get(product_type.replace(" ", " ").strip().lower())
 
 
 def _size_gb(token: str) -> float:
@@ -134,9 +130,10 @@ def parse_properties(properties: str, product_type: str) -> dict[str, str]:
         out["storage"] = sizes[0]
     elif "ram" in fields and len(sizes) == 2:
         small, large = sorted(sizes, key=_size_gb)
-        if _size_gb(small) <= 128 and _size_gb(large) >= 128 and _size_gb(large) > _size_gb(small):
+        lo, hi = _size_gb(small), _size_gb(large)
+        if lo <= 64 and hi >= 128 and hi >= 2 * lo:
             out["ram"], out["storage"] = small, large
     colours = [t for t in leftovers if not re.search(r"\d", t) and not _NON_COLOUR.match(t)]
     if "colour" in fields and colours:
-        out["colour"] = " / ".join(colours)
+        out["colour"] = " / ".join(colours[:2])
     return out
