@@ -411,10 +411,12 @@ def test_cpu_keeps_full_model(text, cpu):
     assert desc(text)["cpu"] == (cpu, False)
 
 
-def test_cpu_conflict_by_containment():
+def test_cpu_truncated_model_is_a_conflict():
+    # Round 1 compared by containment; round 2 review: only vendor prefix / "processor"-style
+    # filler may differ, so a description missing the model number is a conflict.
     p = {"name": "X", "productType": "Notebooks", "properties": '15.60", 512 GB, 32 GB, CH, Intel Core Ultra 7 155H',
          "description": "Powered by Intel Core Ultra 7 graphics."}
-    assert specs.extract(p, "en")["cpu"].conflict is None
+    assert specs.extract(p, "en")["cpu"].conflict is not None
 
 
 @pytest.mark.parametrize("text", ["Refresh rate bis 144 Hz.", "Refresh rate max. 144 Hz.",
@@ -431,3 +433,109 @@ def test_tot_is_ceiling_only_in_dutch():
 def test_flip8_camera_main_value_not_the_one_next_to_keyword():
     # "50 MP / 12 MP dual camera, 10 MP front camera": the first listed value is the main camera.
     assert values(FLIP8_EN, "en")["camera"] == "50 MP"
+
+
+# ---- Task 7 fix round 2
+
+@pytest.mark.parametrize("text, lang", [("Frequency range 20 Hz - 20 kHz for rich sound.", "en"),
+                                        ("Der Frequenzbereich reicht von 20 Hz bis 20 kHz.", "de"),
+                                        ("A 60 Hz mains adapter.", "en")])
+def test_refresh_requires_refresh_keyword(text, lang):
+    assert "refresh" not in desc(text, lang)
+
+
+def test_selfie_camera_keyword_is_one_unit():
+    assert desc("The selfie camera with 32 MP and the main camera with 50 MP shine.")["camera"] == ("50 MP", False)
+    assert "camera" not in desc("Die Selfie-Kamera mit 32 MP.", "de")
+
+
+@pytest.mark.parametrize("text, cpu", [
+    ("Powered by the MediaTek Dimensity 7300 Ultra 5G chip.", "MediaTek Dimensity 7300 Ultra"),
+    ("Snapdragon 8 Gen 3 8GB RAM 256GB storage.", "Snapdragon 8 Gen 3"),
+    ("Snapdragon 8 Gen 3 12 GB RAM.", "Snapdragon 8 Gen 3"),
+])
+def test_cpu_suffix_stops_at_network_and_sizes(text, cpu):
+    assert desc(text)["cpu"] == (cpu, False)
+
+
+def test_os_after_update_ceiling_is_not_stated():
+    out = specs.extract({"name": "X", "productType": "Smartphones", "properties": "",
+                         "description": "Samsung guarantees updates up to Android 21 for this phone running One UI 8."},
+                        "en")
+    assert out["os"].value == "One UI 8"
+    assert out["android_version"].value == "16" and out["android_version"].state == "inferred"
+    assert "os" not in desc("Mit Updates bis Android 20.", "de")
+
+
+def test_max_dot_needs_a_following_number():
+    assert desc("The iPhone 16 Pro Max. 256 GB storage.")["storage"] == ("256 GB", False)
+
+
+@pytest.mark.parametrize("text, lang, value", [
+    ("128 GB storage expandable via microSD.", "en", "128 GB"),
+    ("Der 256 GB Speicher erweiterbar per microSD-Karte.", "de", "256 GB"),
+    ("Storage 128 GB expandable up to 1 TB.", "en", "128 GB"),
+])
+def test_expandable_base_value_is_not_ceiling_round2(text, lang, value):
+    assert desc(text, lang)["storage"] == (value, False)
+
+
+def test_expandable_target_is_ceiling():
+    assert desc("Storage expandable up to 1 TB.")["storage"] == ("1 TB", True)
+    assert desc("Speicher erweiterbar auf 1 TB.", "de")["storage"] == ("1 TB", True)
+
+
+@pytest.mark.parametrize("text, lang", [("8 GB RAM 256 GB storage.", "en"), ("8 GB RAM 256 GB Speicher.", "de"),
+                                        ("RAM 8 GB Speicher 256 GB.", "de")])
+def test_equidistant_keyword_binds_to_the_free_value(text, lang):
+    out = desc(text, lang)
+    assert out["ram"] == ("8 GB", False) and out["storage"] == ("256 GB", False)
+
+
+def _cpu_product(props_cpu, description):
+    return {"name": "X", "productType": "Notebooks", "properties": f'15.60", 512 GB, 32 GB, CH, {props_cpu}',
+            "description": description}
+
+
+def test_cpu_conflict_rules():
+    out = specs.extract(_cpu_product("Apple M3", "Powered by the Apple M3 Pro chip."), "en")
+    assert out["cpu"].conflict == "Apple M3 (properties) / Apple M3 Pro (description)"
+    out = specs.extract(_cpu_product("Intel Core Ultra 7 155H Processor", "With an Intel Core Ultra 7 155H."), "en")
+    assert out["cpu"].conflict is None
+    out = specs.extract(_cpu_product("M5", "Powered by the Apple M5 chip."), "en")
+    assert out["cpu"].conflict is None
+
+
+def test_guard_speaker_vs_charging():
+    assert desc("45 W charging speaker dock, 20 W speakers.")["charging"] == ("45 W", False)
+    assert "charging" not in desc("Loud 20 W speakers and fast charging support.")
+
+
+@pytest.mark.parametrize("text", ["RAM, 8 GB.", "RAM / 8 GB.", "RAM (8 GB)."])
+def test_guard_no_binding_across_comma_slash_bracket(text):
+    assert "ram" not in desc(text)
+
+
+def test_guard_equidistant_keyword_without_free_value_skips():
+    assert "ram" not in desc("8 GB RAM 256 GB.")
+
+
+def test_guard_cross_group_tie_drops_value():
+    out = desc("RAM 8 GB SSD.")
+    assert "ram" not in out and "storage" not in out
+
+
+def test_guard_vram_before_ram_keyword():
+    assert "ram" not in desc("8 GB GDDR6 RAM.")
+
+
+def test_guard_os_from_without_migrate():
+    assert "os" not in desc("Der Wechsel von Android 10 ist einfach.", "de")
+
+
+def test_guard_res_not_third_dimension_integers():
+    assert "resolution" not in desc("Abmessungen 1230 x 720 x 230.", "de")
+
+
+def test_guard_res_part_decimal_without_unit():
+    assert "resolution" not in desc("Grösse 162,4 x 75,7 laut Hersteller.", "de")

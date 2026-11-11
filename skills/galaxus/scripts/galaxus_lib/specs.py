@@ -152,15 +152,18 @@ _KW = {
                 "it": [r"\bmemoria interna", r"\barchiviazione", r"\bssd\b"], "nl": [r"\bopslag", r"\bssd\b"]},
     "_vram": {"en": [r"\bgddr\w*", r"\bvram\b", r"\bgraphics", r"\bvideo memory"],
               "de": [r"\bgrafik\w*"], "fr": [r"\bgraphique"], "it": [r"\bgrafic\w*"], "nl": [r"\bgrafisch\w*"]},
-    "refresh": {"en": [r"\brefresh"], "de": [r"\bbildwiederhol\w*", r"\bwiederholrate"],
-                "fr": [r"rafra[iî]chissement"], "it": [r"\baggiornamento"], "nl": [r"\bverversing\w*"]},
+    "refresh": {"en": [r"\brefresh", r"\w*display", r"\bscreen", r"\bpanel", r"\bmonitor"],
+                "de": [r"\bbildwiederhol\w*", r"\bwiederholrate", r"\bbildschirm"],
+                "fr": [r"rafra[iî]chissement", r"\bécran"], "it": [r"\baggiornamento", r"\bschermo"],
+                "nl": [r"\bverversing\w*", r"\bscherm"]},
     "_not_refresh": {"en": [r"\btouch[- ]?sampling", r"\bsampling", r"\bfrequency response", r"\bpwm\b",
                             r"\bdimming"],
                      "de": [r"\babtast\w*", r"\bfrequenzgang"], "fr": [r"réponse en fréquence", r"échantillonnage"],
                      "it": [r"risposta in frequenza", r"\bcampionamento"], "nl": [r"\bfrequentiebereik"]},
     "camera": {"en": [r"\w*camera"], "de": [r"\w*kamera"], "fr": [r"caméra"], "it": [r"\w*camera"],
                "nl": [r"\w*camera"]},
-    "_not_camera": {"en": [r"\bfront[- ]?(?:facing[- ])?camera", r"\w*selfie\w*"],
+    # Whole phrases, so plain "camera"/"Kamera" cannot bind the selfie value on its own.
+    "_not_camera": {"en": [r"\bfront[- ]?(?:facing[- ])?(?:camera|kamera)", r"\w*selfie(?:[- ]?(?:camera|kamera)|\w*)"],
                     "de": [r"\bfront-?kamera"], "fr": [r"caméra frontale"], "it": [r"fotocamera frontale"],
                     "nl": [r"\bvoorcamera", r"\bfrontcamera"]},
     "weight": {"en": [r"\bweigh"], "de": [r"\bgewicht", r"\bwiegt"], "fr": [r"\bpoids", r"\bpèse"],
@@ -176,13 +179,16 @@ _KW = {
 }
 
 # A value right after one of these is a range/ceiling, not this variant's value.
-_CEILING = (r"up to", r"bis zu", r"\bbis\b", r"jusqu.à", r"fino a", r"\bmax\.", r"\bmaxim(?:um|al)\w*",
+_CEILING = (r"up to", r"bis zu", r"\bbis\b", r"jusqu.à", r"fino a", r"(?-i:\bmax\.)\s*$", r"\bmaxim(?:um|al)\w*",
             r"memory extension", r"speichererweiterung", r"configurations", r"konfigurationen")
 _CEILING_LANG = {"nl": (r"\btot\b",)}
-# "auf 1 TB erweiterbar" is a ceiling; "128 GB, expandable up to 1 TB" is not (the ceiling follows).
-_EXPAND = re.compile(r"\s*(?:\w+\s+)?(?:expandable|erweiterbar|extensible|espandibile|uitbreidbaar)"
-                     r"(?!\s+(?:up to|to|bis|auf|jusqu|fino|tot)\b)", re.I)
-_BOUNDARY = re.compile(r"(?<!\bmax)(?<!\bca)[.!?](?=\s|$)|\n|•|;", re.I)
+# Only the expansion target is a ceiling: "erweiterbar auf 1 TB", "auf 1 TB erweiterbar". The base
+# value in "128 GB storage expandable via microSD" / "128 GB expandable up to 1 TB" is not.
+_EXPAND_WORD = r"(?:expandable|erweiterbar|extensible|espandibile|uitbreidbaar)"
+_EXPAND_BEFORE = re.compile(_EXPAND_WORD + r"(?:\s+(?:up to|to|auf|bis|jusqu.à|à|fino a|a|tot))?\s+$", re.I)
+_EXPAND_AFTER = re.compile(r"\s*" + _EXPAND_WORD, re.I)
+_EXPAND_TO = re.compile(r"\b(?:auf|to|à|a|tot)\s+$", re.I)
+_BOUNDARY = re.compile(r"(?<!\bmax)(?<!\bca)[.!?](?=\s|$)|\n|•|;")  # case-sensitive: "Pro Max." ends a sentence
 _WINDOW = 40
 # Connector words a keyword absorbs on its right: "RAM: 8 GB", "refresh rate of 120 Hz".
 _CONNECT = re.compile(r"(?:\s*(?:[:=]|\b(?:rate|of|von|de|du|di|van)\b))*", re.I)
@@ -233,6 +239,7 @@ def _bind(text: str, spans: list[tuple[int, int]], groups: list[str], lang: str)
         if all(b <= ka or a >= kb for ka, kb, _ in keywords):
             keywords.append((a, b, g))
     bound: list[list[tuple[int, str]]] = [[] for _ in spans]
+    ties: list[tuple[str, list[int], int]] = []
     for a, b, g in keywords:
         s0, s1 = _sentence_span(text, a)
         near = []
@@ -245,6 +252,14 @@ def _bind(text: str, spans: list[tuple[int, int]], groups: list[str], lang: str)
         near.sort()
         if near and (len(near) == 1 or near[0][0] < near[1][0]):
             bound[near[0][1]].append((near[0][0], g))
+        elif near:
+            ties.append((g, [i for d, i in near if d == near[0][0]], near[0][0]))
+    # "8 GB RAM 256 GB storage": RAM is equidistant, but 256 GB is already held as closely by
+    # storage, so RAM takes the value that is still free; with no single free value it binds to none.
+    for g, idx, d in ties:
+        free = [i for i in idx if not any(hd <= d and hg != g for hd, hg in bound[i])]
+        if len(free) == 1:
+            bound[free[0]].append((d, g))
     out: list[tuple[str, int] | None] = []
     for hits in bound:
         hits.sort()
@@ -282,7 +297,8 @@ def _is_ceiling(text: str, start: int, end: int, unit: str, lang: str) -> bool:
         units = [u for _, u in re.findall(NUM + r"\s?-?\s?([^\W\d_]+|[\"”″])", gap)]
         if len(units) == len(nums) and all(_family(u) == _family(unit) for u in units):
             return True
-    return bool(_EXPAND.match(text, end))
+    return bool(_EXPAND_BEFORE.search(before)
+                or (_EXPAND_AFTER.match(text, end) and _EXPAND_TO.search(before)))
 
 
 def _rx(unit: str, flags=re.I):
@@ -290,7 +306,9 @@ def _rx(unit: str, flags=re.I):
 
 
 # field -> (regex, unit, keyword group, disqualifying group); the unit itself is the evidence, so
-# unbound values are kept, and only values bound to the disqualifying group are dropped.
+# unbound values are kept (except for _BIND_REQUIRED fields, where Hz alone is too weak: audio
+# frequency ranges, mains adapters), and values bound to the disqualifying group are dropped.
+_BIND_REQUIRED = {"refresh"}
 _UNIT_FIELDS = {
     "battery": (_rx(r"\s?mAh\b"), "mAh", None, None),
     "camera": (_rx(r"\s?-?\s?(?:MP|mega-?pixels?|mégapixels?)\b"), "MP", "camera", "_not_camera"),
@@ -314,9 +332,12 @@ _OS_NOT = re.compile(r"or (?:later|higher|newer|above)|oder (?:höher|neuer)|ou 
                      r"|o superiore|of hoger|compatib|kompatib|requires|erfordert|nécessite|richiede|vereist"
                      r"|migrat|\bab (?=Android|iOS)", re.I)
 _OS_FROM = re.compile(r"\b(?:from|von|de|da|van|ab)\s+$", re.I)
+# "updates up to Android 21" promises a future OS, not the shipped one.
+_OS_CEILING = re.compile(r"up to|bis zu|\bbis\b|jusqu.à|fino a|\btot\b|update|upgrade|mises? à jour|aggiornament",
+                         re.I)
 _CPU = re.compile(r"\b(?:(?:Qualcomm |MediaTek )?(?:Snapdragon|Dimensity|Helio|Exynos|Tensor|Unisoc|Kirin)"
                   r"|Intel Core|AMD Ryzen)\b[\w\- ]{0,25}?\d[\w\-]*"
-                  r"(?: (?:\d+[A-Za-z][\w\-]*|Ultra|Pro|Plus|Max|Elite|Gen \d+)\b)*"
+                  r"(?: (?:(?!\d+(?:G|[GT]B)\b)\d+[A-Za-z][\w\-]*|Ultra|Pro|Plus|Max|Elite|Gen \d+)\b)*"
                   r"|\bApple [AM]\d+(?: (?:Pro|Max|Ultra))?\b")
 _PANEL = re.compile(r"\b(QD-OLED|Mini-?LED|Super AMOLED|AMOLED|OLED|IPS|VA|TN|LCD)\b")
 _NET = re.compile(r"(?<!\d[.,])\b(5G|4G|LTE)\b")   # "2.4G" / "5.8G" are radio bands
@@ -353,7 +374,7 @@ def extract_description(text: str, lang: str) -> dict[str, tuple[str, bool]]:
         binds = (_bind(text, [m.span() for m in matches], [not_kw, kw], lang) if kw
                  else [None] * len(matches))
         for m, b in zip(matches, binds):
-            if b and (b[0] == "?" or b[0].startswith("_")):
+            if (b and (b[0] == "?" or b[0].startswith("_"))) or (b is None and field in _BIND_REQUIRED):
                 continue
             number = _battery(m[1], lang) if field == "battery" else parse_number(m[1], lang)
             if number is None:
@@ -388,7 +409,8 @@ def extract_description(text: str, lang: str) -> dict[str, tuple[str, bool]]:
     for m in _OS.finditer(text):
         s0, s1 = _sentence_span(text, m.start())
         near = text[max(s0, m.start() - _WINDOW):min(s1, m.end() + _WINDOW)]
-        if _OS_NOT.search(near) or _OS_FROM.search(text[max(s0, m.start() - 10):m.start()]):
+        if (_OS_NOT.search(near) or _OS_FROM.search(text[max(s0, m.start() - 10):m.start()])
+                or _OS_CEILING.search(text[max(s0, m.start() - 30):m.start()])):
             continue
         if m[2] or _keyword_distance(text, m.start(), m.end(), _kw("os", lang)) is not None:
             add("os", " ".join(x for x in (m[1], m[2], m[3]) if x))
@@ -418,12 +440,20 @@ def extract_description(text: str, lang: str) -> dict[str, tuple[str, bool]]:
 
 # ------------------------------------------------------------------ merge
 
+_CPU_VENDOR = re.compile(r"^(?:(?:apple|qualcomm|mediatek|intel|amd|samsung|google)\s+)+")
+_CPU_FILLER = re.compile(r"(?:\s+(?:processor|prozessor|processeur|processore|chip|chipset|cpu|soc))+$")
+
+
+def _cpu_key(s: str) -> str:
+    s = " ".join(s.lower().split())
+    return _CPU_FILLER.sub("", _CPU_VENDOR.sub("", s))
+
+
 def _same(field: str, a: str, b: str) -> bool:
     if field == "network":
         return a.replace("LTE", "4G") == b.replace("LTE", "4G")
-    if field == "cpu":  # "Intel Core Ultra 7" names the same chip as "Intel Core Ultra 7 155H"
-        x, y = a.lower(), b.lower()
-        return x in y or y in x
+    if field == "cpu":  # "M5" == "Apple M5"; "… 155H Processor" == "… 155H"; "Apple M3 Pro" != "Apple M3"
+        return _cpu_key(a) == _cpu_key(b)
 
     def nums(s):
         return [float(x) for x in re.findall(r"\d+(?:\.\d+)?", s)]
