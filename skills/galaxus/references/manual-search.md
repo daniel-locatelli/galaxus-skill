@@ -15,23 +15,28 @@ Pass on every call:
 - `query`: the category query (SKILL.md section 2).
 - `language`: en, de, fr, it or nl (required).
 - `agentInfo` (required): name the skill and yourself honestly, e.g.
-  `galaxus-skill manual path, Claude Code, <model id>`.
+  `galaxus-skill/0.1.0 manual path, <host>, <model id>`.
 - `first: 50` (the default is 10).
-- `minPrice` / `maxPrice`: integers 1…1,000,000, **inclusive**.
+- `minPrice` / `maxPrice`: integers 1…1,000,000, **inclusive**. Without a
+  user range, search 1–1,000,000.
 
 Leave `userIntent` out; it is optional and this skill never sends it.
 
 ## Procedure
 
-1. Root call over the user's range. If `errorMessage` is present, or the tool
-   returns an error result, the search failed: say so; it is not zero results.
+1. Root call over the user's range.
+   **On any call**, root or band: if the payload has `errorMessage` or the
+   tool returns an error result, the search has *failed*. Stop, and report a
+   failed search (not zero results) with the unique ids seen so far and the
+   bands not searched. A band whose call failed is never done or empty.
 2. Gate: if `totalCount` > 500, do not split; ask the user to narrow (brand in
    the query, tighter price range).
 3. Keep a list of bands to do and a set of product ids seen.
 4. A band `[a, b]` is done when `totalCount` ≤ 50 and all its products came
-   back. Otherwise take the median price of the returned products, rounded,
-   clamped to `a < m < b`; split into `[a, m]` and `[m, b]` and do them in
-   ascending order. The shared endpoint `m` matters: prices like 193.97 fall
+   back. Otherwise take the median of the returned
+   `priceIfAvailable.amountInclusive` values (skip null prices), rounded,
+   clamped to `a < m < b` (no prices: the geometric mean of `a` and `b`).
+   Split into `[a, m]` and `[m, b]` and do them in ascending order. The shared endpoint `m` matters: prices like 193.97 fall
    between integer bounds and are lost with `[a, m]`, `[m+1, b]`.
 5. A band with `b − a ≤ 1` and more than 50 products is *capped*: keep its 50,
    note it. Capped bands are usually cheap accessories; a narrower query or a

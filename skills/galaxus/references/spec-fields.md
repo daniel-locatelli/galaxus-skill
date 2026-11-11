@@ -62,8 +62,10 @@ expansion target is a ceiling: in "128 GB storage expandable to 1 TB" the
 storage is 128 GB, stated. A plain value always beats a ceiling for the same
 field.
 
-`filter` and ceilings: `refresh>=144` is excluded on "up to 120 Hz" and
-unknown on "up to 240 Hz"; `<=`, `=` and `~` on a ceiling are unknown.
+`filter` and ceilings (the real value is at most the ceiling):
+`refresh>=144` is excluded on "up to 120 Hz" and unknown on "up to 240 Hz";
+`refresh<=144` matches "up to 120 Hz" and is unknown on "up to 240 Hz";
+`=` and `~` on a ceiling are unknown.
 
 ## Fields (filter names)
 
@@ -72,6 +74,18 @@ unknown on "up to 240 Hz"; `<=`, `=` and `~` on a ceiling are unknown.
 `brightness` (nits), `response` (ms), `battery` (mAh), `charging` (W),
 `camera` (MP, main), `weight`, `network` (4G/5G), `sim`, `ip` (e.g.
 IP66/IP68), `ports`, `keyboard`, `colour`.
+
+Per-field filter rules:
+
+- `weight`: `>=`, `<=` and `=` need a unit, g or kg, and compare in grams
+  (`weight<=1.5kg` = `weight<=1500g`). A bare number (`weight<=1500`) is
+  invalid input, exit 3.
+- `network=4G` also matches `LTE`.
+- `=` with text is an exact match: `os=Android` fails on "Android 15"; use
+  `os~Android` (substring), or `android_version>=15`.
+- `resolution>=N` / `<=N` compare the first number only, the width
+  (`resolution>=2560` on "2560 x 1440").
+- `ram`, `storage`: numbers in GB, 1 TB = 1000 GB.
 
 Numbers: `6,99` is a decimal comma; `8'340`, `3.840` (de/fr/it/nl) and
 `8,340` (en) are thousands.
