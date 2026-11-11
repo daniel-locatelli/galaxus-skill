@@ -287,3 +287,147 @@ def test_infer_android_table():
 def test_extract_orders_fields():
     assert list(specs.extract(NOTE17PRO_DE, "de")) == [f for f in specs.FIELD_ORDER
                                                         if f in specs.extract(NOTE17PRO_DE, "de")]
+
+
+# ---- Task 7 fix round 1
+
+def desc(text, lang="en"):
+    return specs.extract_description(text, lang)
+
+
+@pytest.mark.parametrize("text, lang", [
+    ("Mit Abmessungen von 162,4 x 75,7 x 8,2 mm liegt es gut in der Hand.", "de"),
+    ("The phone measures 160.5 x 75.2 x 8.2 mm.", "en"),
+    ("Footprint 300 x 200 mm.", "en"),
+])
+def test_dimensions_are_not_resolution(text, lang):
+    assert "resolution" not in desc(text, lang)
+
+
+def test_resolution_thousands_and_plain_still_work():
+    assert desc("Auflösung von 3.840 x 2.160 Pixeln.", "de")["resolution"] == ("3840 x 2160", False)
+    assert desc("A 2560 x 1440 panel.")["resolution"] == ("2560 x 1440", False)
+
+
+def test_keyword_directly_before_value_wins():
+    out = desc("RAM: 8 GB, Storage: 256 GB.")
+    assert out["ram"] == ("8 GB", False) and out["storage"] == ("256 GB", False)
+
+
+def test_graphics_memory_is_not_ram():
+    out = desc("NVIDIA RTX 4060 with 8 GB GDDR6 and 16 GB RAM, plus 1 TB SSD.")
+    assert out["ram"] == ("16 GB", False) and out["storage"] == ("1 TB", False)
+
+
+@pytest.mark.parametrize("text, lang, field, value", [
+    ("Available with up to 16 GB of RAM and 1 TB of storage.", "en", "storage", "1 TB"),
+    ("Erhältlich mit bis zu 12 GB RAM, 512 GB Speicher.", "de", "storage", "512 GB"),
+    ("Erhältlich mit bis zu 12 GB RAM und 512 GB Speicher.", "de", "storage", "512 GB"),
+])
+def test_ceiling_covers_following_values_of_same_kind(text, lang, field, value):
+    assert desc(text, lang)[field] == (value, True)
+
+
+def test_ceiling_does_not_cross_into_other_units():
+    out = desc("Taktfrequenz von bis zu 2,4 GHz und 4 GB RAM.", "de")
+    assert out["ram"] == ("4 GB", False)
+
+
+def test_refresh_needs_its_own_keyword_not_touch_sampling():
+    assert desc("Touch sampling rate of 240 Hz and a refresh rate of 120 Hz.")["refresh"] == ("120 Hz", False)
+    assert "refresh" not in desc("Frequency response 20 Hz - 20 kHz.")
+    assert "refresh" not in desc("Frequenzgang 20 Hz bis 20 kHz.", "de")
+
+
+def test_front_camera_is_not_main_camera():
+    assert desc("The 32 MP front camera and the 50 MP main camera.")["camera"] == ("50 MP", False)
+    assert "camera" not in desc("Die 32 MP Frontkamera macht scharfe Selfies.", "de")
+
+
+@pytest.mark.parametrize("text, lang", [
+    ("Compatible with smartphones running Android 8.0 or later.", "en"),
+    ("Smart Switch: migrate easily from Android 10 devices.", "en"),
+    ("Kompatibel mit Smartphones ab Android 9.", "de"),
+    ("Funktioniert mit Android 11 oder höher.", "de"),
+])
+def test_os_compatibility_mentions_are_not_the_os(text, lang):
+    out = desc(text, lang)
+    assert "os" not in out and "android_version" not in out
+
+
+@pytest.mark.parametrize("text", ["Connects via 2.4G wireless receiver.", "Uses a 2,4G dongle.",
+                                  "Video link on 5.8G."])
+def test_network_not_inside_radio_band(text):
+    assert "network" not in desc(text)
+
+
+def test_lte_in_description_is_not_a_conflict_with_lte_properties():
+    p = {"name": "X", "productType": "Smartphones", "properties": "128 GB, Black, 6.1\", LTE",
+         "description": "Supports LTE for fast mobile data."}
+    assert specs.extract(p, "en")["network"].conflict is None
+
+
+@pytest.mark.parametrize("text, lang", [("Der Akku mit 5,000 mAh hält lange.", "de"),
+                                        ("The 5.000 mAh battery lasts.", "en")])
+def test_battery_thousands_reparsed(text, lang):
+    assert desc(text, lang)["battery"] == ("5000 mAh", False)
+
+
+def test_battery_implausible_dropped():
+    assert "battery" not in desc("A 4.5 mAh coin cell.")
+
+
+def test_expandable_base_value_is_not_ceiling():
+    assert desc("Storage: 128 GB, expandable up to 1 TB via microSD.")["storage"] == ("128 GB", False)
+
+
+def test_expandable_value_before_keyword_is_ceiling():
+    assert desc("Der Speicher ist auf 1 TB erweiterbar.", "de")["storage"] == ("1 TB", True)
+
+
+def test_plain_value_preferred_over_earlier_ceiling():
+    out = desc("Peak brightness up to 2000 nits. Typical brightness 800 nits.")
+    assert out["brightness"] == ("800 nits", False)
+
+
+def test_ceiling_never_creates_conflict():
+    p = {"name": "X", "productType": "Smartphones", "properties": '256 GB, Black, 6.1", 5G',
+         "description": "Der Speicher ist bis zu 512 GB gross."}
+    out = specs.extract(p, "de")
+    assert out["storage"].value == "256 GB" and out["storage"].conflict is None
+
+
+def test_speaker_watts_are_not_charging():
+    assert "charging" not in desc("The 30 W speakers deliver rich sound.")
+    assert desc("Supports 45 W fast charging and has 2 W speakers.")["charging"] == ("45 W", False)
+
+
+@pytest.mark.parametrize("text, cpu", [
+    ("Powered by an Intel Core Ultra 7 155H processor.", "Intel Core Ultra 7 155H"),
+    ("With an AMD Ryzen 7 7840HS and 16 GB RAM.", "AMD Ryzen 7 7840HS"),
+    ("The Snapdragon 8 Elite chip is fast.", "Snapdragon 8 Elite"),
+])
+def test_cpu_keeps_full_model(text, cpu):
+    assert desc(text)["cpu"] == (cpu, False)
+
+
+def test_cpu_conflict_by_containment():
+    p = {"name": "X", "productType": "Notebooks", "properties": '15.60", 512 GB, 32 GB, CH, Intel Core Ultra 7 155H',
+         "description": "Powered by Intel Core Ultra 7 graphics."}
+    assert specs.extract(p, "en")["cpu"].conflict is None
+
+
+@pytest.mark.parametrize("text", ["Refresh rate bis 144 Hz.", "Refresh rate max. 144 Hz.",
+                                  "A maximum refresh rate of 144 Hz."])
+def test_more_ceiling_phrases(text):
+    assert desc(text, "de")["refresh"] == ("144 Hz", True)
+
+
+def test_tot_is_ceiling_only_in_dutch():
+    assert desc("Opslag tot 512 GB.", "nl")["storage"] == ("512 GB", True)
+    assert desc("Storage tot 512 GB.", "en")["storage"] == ("512 GB", False)
+
+
+def test_flip8_camera_main_value_not_the_one_next_to_keyword():
+    # "50 MP / 12 MP dual camera, 10 MP front camera": the first listed value is the main camera.
+    assert values(FLIP8_EN, "en")["camera"] == "50 MP"
