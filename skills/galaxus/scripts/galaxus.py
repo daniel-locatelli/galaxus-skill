@@ -50,9 +50,16 @@ def _now() -> str:
 
 def _write_json(path: str, doc: dict) -> None:
     tmp = f"{path}.tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(doc, fh, ensure_ascii=False, indent=1)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, path)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _read_json(path: str) -> dict:
@@ -68,6 +75,28 @@ def _fail(code: int, message: str) -> int:
     return code
 
 
+def _positive(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a positive integer") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return value
+
+
+def _check_out(path: str | None) -> str | None:
+    """Error message if the --out parent directory is missing or not writable (never creates it)."""
+    if not path:
+        return None
+    parent = os.path.dirname(os.path.abspath(path))
+    if not os.path.isdir(parent):
+        return f"--out directory does not exist: {parent}"
+    if not os.access(parent, os.W_OK):
+        return f"--out directory is not writable: {parent}"
+    return None
+
+
 def _price(text: str) -> int:
     try:
         value = int(text)
@@ -81,6 +110,8 @@ def _price(text: str) -> int:
 # ---------------------------------------------------------------- commands
 
 def cmd_count(args) -> int:
+    if args.min and args.max and args.min > args.max:
+        return _fail(EXIT_INPUT, "--min must not exceed --max")
     try:
         page = make_fetch(make_client(), args.query, args.lang)(args.min, args.max, 1)
     except transport.TransportError as e:
@@ -88,8 +119,7 @@ def cmd_count(args) -> int:
     except transport.ToolInputError as e:
         return _fail(EXIT_INPUT, f"Galaxus rejected the input: {e}")
     if page.error:
-        print(f"Galaxus search error: {page.error} (a failed search, not zero results)")
-        return EXIT_SEARCH
+        return _fail(EXIT_SEARCH, f"Galaxus search error: {page.error} (a failed search, not zero results)")
     print(page.total)
     if page.corrected:
         print(f'Note: Galaxus spell-corrected the query to "{page.corrected}".')
@@ -100,15 +130,35 @@ def cmd_search(args) -> int:
     lo, hi = args.min or 1, args.max or 1_000_000
     if lo > hi:
         return _fail(EXIT_INPUT, "--min must not exceed --max")
+    problem = _check_out(args.out)
+    if problem:
+        return _fail(EXIT_INPUT, problem)
     fetch = make_fetch(make_client(), args.query, args.lang)
     cache: dict = {}
+    warned = []
 
     def document(res):
         return report.build_document(res, args.query, args.lang, __version__, _now(), cache)
 
     def checkpoint(res):
         if args.out:
-            _write_json(args.out, document(res))
+            try:
+                _write_json(args.out, document(res))
+            except OSError as e:
+                if not warned:
+                    warned.append(True)
+                    print(f"warning: cannot write checkpoint to {args.out}: {e}; continuing without checkpoints",
+                          file=sys.stderr)
+
+    def finish(doc, code):
+        print(report.format_report(doc, args.top, args.out))
+        if args.out:
+            try:
+                _write_json(args.out, doc)
+            except OSError as e:
+                print(f"cannot write {args.out}: {e}", file=sys.stderr)
+                return EXIT_SEARCH
+        return code
 
     try:
         res = searchmod.search(fetch, lo, hi, args.max_calls, on_update=checkpoint)
@@ -117,16 +167,8 @@ def cmd_search(args) -> int:
     except transport.ToolInputError as e:
         return _fail(EXIT_INPUT, f"Galaxus rejected the input: {e}")
     except searchmod.SearchFailed as e:
-        doc = document(e.partial)
-        if args.out:
-            _write_json(args.out, doc)
-        print(report.format_report(doc, args.top, args.out))
-        return EXIT_SEARCH
-    doc = document(res)
-    if args.out:
-        _write_json(args.out, doc)
-    print(report.format_report(doc, args.top, args.out))
-    return EXIT_OK
+        return finish(document(e.partial), EXIT_SEARCH)
+    return finish(document(res), EXIT_OK)
 
 
 def cmd_filter(args) -> int:
@@ -157,7 +199,7 @@ def cmd_compare(args) -> int:
     except ValueError as e:
         return _fail(EXIT_INPUT, str(e))
     by_id = {p["id"]: p for p in doc["products"]}
-    found, notes, client = [], [], None
+    found, notes, client, failed = [], [], None, False
     for pid in ids:
         if pid in by_id:
             found.append(by_id[pid])
@@ -171,6 +213,7 @@ def cmd_compare(args) -> int:
             product = compare.lookup(lambda q: make_fetch(client, q, lang), pid, query, price, lang)
         except (transport.TransportError, transport.ToolInputError) as e:
             notes.append(f"{pid}: lookup failed ({e})")
+            failed = failed or isinstance(e, transport.TransportError)
             continue
         if product is None:
             notes.append(f"{pid}: not found (best-effort)")
@@ -179,7 +222,7 @@ def cmd_compare(args) -> int:
     print(compare.comparison_table(found))
     for note in notes:
         print(note)
-    return EXIT_OK
+    return EXIT_SEARCH if failed else EXIT_OK
 
 
 # ------------------------------------------------------------------ parser
@@ -202,8 +245,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("search", help="exhaustive search with a coverage report")
     _query_options(p)
-    p.add_argument("--max-calls", type=int, default=60)
-    p.add_argument("--top", type=int, default=15, help="rows per product type in the printed report")
+    p.add_argument("--max-calls", type=_positive, default=60)
+    p.add_argument("--top", type=_positive, default=15, help="rows per product type in the printed report")
     p.add_argument("--out", help="write the full JSON document here (checkpointed after every call)")
     p.set_defaults(func=cmd_search)
 
@@ -211,7 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--from", dest="source", required=True)
     p.add_argument("--where", action="append", default=[], help="FIELD>=N, FIELD<=N, FIELD=VALUE or FIELD~TEXT")
     p.add_argument("--type", action="append", default=[], help="keep only this productType (repeatable)")
-    p.add_argument("--top", type=int, default=15)
+    p.add_argument("--top", type=_positive, default=15)
     p.set_defaults(func=cmd_filter)
 
     p = sub.add_parser("compare", help="spec table across product ids")
