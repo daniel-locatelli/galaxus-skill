@@ -17,6 +17,7 @@ PROTOCOL_VERSION = "2025-06-18"
 TIMEOUT_S = 30
 CALL_DELAY_S = 0.2
 BACKOFF_S = (1, 4)
+RETRY_AFTER_MAX_S = 30
 ACCEPT = "application/json, text/event-stream"
 
 
@@ -60,9 +61,12 @@ def parse_body(content_type: str | None, body: str) -> list[dict]:
 def _retry_after(headers, default: float) -> float:
     value = headers.get("Retry-After") if headers is not None else None
     try:
-        return float(value)
+        seconds = float(value)
     except (TypeError, ValueError):
         return default
+    if seconds != seconds:  # NaN
+        return default
+    return min(max(seconds, 0.0), RETRY_AFTER_MAX_S)
 
 
 def _error_text(err: urllib.error.HTTPError) -> str:

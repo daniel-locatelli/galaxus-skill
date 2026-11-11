@@ -232,3 +232,144 @@ def test_compare_lookup_not_found_stays_exit_0(use_catalogue, tmp_path, capsys):
     out = tmp_path / "r.json"
     galaxus.main(["search", "phone", "--max", "115", "--out", str(out)])
     assert galaxus.main(["compare", "--from", str(out), "--ids", "1,555", "--lookup", "555=Nothing@120"]) == 0
+
+
+# ---- final review fixes
+
+class PayloadClient:
+    """Returns scripted payloads, one per call (the last one repeats)."""
+
+    def __init__(self, payloads):
+        self.payloads = list(payloads)
+        self.calls = 0
+
+    def search_products(self, query, language, first=50, min_price=None, max_price=None):
+        self.calls += 1
+        payload = self.payloads[min(self.calls, len(self.payloads)) - 1]
+        return {"payload": payload, "meta": None}
+
+
+def ok_payload(products, total=None):
+    return {"correctedSearchTerm": None, "totalCount": len(products) if total is None else total,
+            "products": products}
+
+
+@pytest.mark.parametrize("payload", [
+    {"correctedSearchTerm": None, "products": []},                      # no totalCount
+    {"totalCount": "12", "products": []},                               # totalCount not int
+    {"totalCount": True, "products": []},
+    {"totalCount": 3, "products": "abc"},                               # products not a list
+    {"totalCount": 3},                                                  # products missing, total > 0
+    {"totalCount": 1, "products": [{"name": "no id"}]},                 # product without id
+    {"totalCount": 1, "products": ["x"]},                               # product not a dict
+    ["not", "a", "dict"],
+    None,
+])
+def test_make_fetch_rejects_unexpected_shapes(payload):
+    fetch = galaxus.make_fetch(PayloadClient([payload]), "q", "en")
+    with pytest.raises(transport.TransportError, match="unexpected response shape"):
+        fetch(1, 10, 50)
+
+
+def test_make_fetch_accepts_error_message_and_empty_results():
+    err = galaxus.make_fetch(PayloadClient([{"errorMessage": "boom", "products": None}]), "q", "en")(1, 10, 50)
+    assert err.error == "boom" and err.products == []
+    empty = galaxus.make_fetch(PayloadClient([{"totalCount": 0, "products": None}]), "q", "en")(1, 10, 50)
+    assert (empty.total, empty.products, empty.error) == (0, [], None)
+
+
+@pytest.mark.parametrize("payload", [{"products": []}, ["x"], {"totalCount": 1, "products": [{"name": "x"}]}])
+def test_malformed_root_response_exits_2(monkeypatch, capsys, payload):
+    monkeypatch.setattr(galaxus, "make_client", lambda: PayloadClient([payload]))
+    assert galaxus.main(["search", "phone"]) == 2
+    assert "unexpected response shape" in capsys.readouterr().err
+    monkeypatch.setattr(galaxus, "make_client", lambda: PayloadClient([payload]))
+    assert galaxus.main(["count", "phone"]) == 2
+
+
+def test_malformed_response_mid_run_exits_4_with_partial(monkeypatch, capsys):
+    root = ok_payload([make_product(i, 100.0 + i) for i in range(1, 51)], total=120)
+    monkeypatch.setattr(galaxus, "make_client", lambda: PayloadClient([root, {"products": []}]))
+    assert galaxus.main(["search", "phone", "--min", "1", "--max", "1000"]) == 4
+    out = capsys.readouterr().out
+    assert "Coverage: failed." in out and "unexpected response shape" in out
+    assert "50 unique products found" in out
+    assert "uncovered" in out and "(count unknown)" in out
+
+
+def test_max_calls_is_capped_at_300(use_catalogue):
+    use_catalogue(phones(3))
+    assert _code(["search", "x", "--max-calls", "300"]) == 0
+    cat = use_catalogue(phones(3))
+    assert _code(["search", "x", "--max-calls", "301"]) == 3
+    assert cat.calls == []
+
+
+def test_lookup_count_is_capped(use_catalogue, tmp_path, capsys):
+    use_catalogue(phones(30))
+    out = tmp_path / "r.json"
+    galaxus.main(["search", "phone", "--out", str(out)])
+    capsys.readouterr()
+    cat = use_catalogue(phones(30))
+    lookups = [x for i in range(100, 121) for x in ("--lookup", f"{i}=Acme Phone {i}@120")]
+    ids = ",".join(str(i) for i in range(100, 121))
+    assert _code(["compare", "--from", str(out), "--ids", ids] + lookups) == 3
+    assert cat.calls == []
+    assert "at most 20" in capsys.readouterr().err
+
+
+def test_read_json_requires_document_keys(use_catalogue, tmp_path, capsys):
+    use_catalogue(phones(5))
+    out = tmp_path / "r.json"
+    galaxus.main(["search", "phone", "--out", str(out)])
+    doc = json.loads(out.read_text("utf-8"))
+    for key in ("status", "bands", "histogram", "products", "version", "language"):
+        broken = dict(doc)
+        del broken[key]
+        path = tmp_path / f"no_{key}.json"
+        path.write_text(json.dumps(broken), "utf-8")
+        capsys.readouterr()
+        assert galaxus.main(["filter", "--from", str(path), "--where", "ram>=8"]) == 3, key
+        assert key in capsys.readouterr().err
+        assert galaxus.main(["compare", "--from", str(path), "--ids", "1"]) == 3, key
+
+
+def test_read_json_warns_on_other_version(use_catalogue, tmp_path, capsys):
+    use_catalogue(phones(5))
+    out = tmp_path / "r.json"
+    galaxus.main(["search", "phone", "--out", str(out)])
+    doc = json.loads(out.read_text("utf-8"))
+    doc["version"] = "0.0.9"
+    out.write_text(json.dumps(doc), "utf-8")
+    capsys.readouterr()
+    assert galaxus.main(["filter", "--from", str(out), "--where", "ram>=8"]) == 0
+    err = capsys.readouterr().err
+    assert "warning" in err and "0.0.9" in err and galaxus.__version__ in err
+
+
+def test_compare_lookup_error_message_is_a_failed_lookup(use_catalogue, tmp_path, capsys):
+    use_catalogue(phones(30))
+    out = tmp_path / "r.json"
+    galaxus.main(["search", "phone", "--max", "115", "--out", str(out)])
+    capsys.readouterr()
+    use_catalogue(phones(30), error_on_call=1)
+    code = galaxus.main(["compare", "--from", str(out), "--ids", "1,20", "--lookup", "20=Acme Phone 20@120"])
+    text = capsys.readouterr().out
+    assert code == 4
+    assert "20: lookup failed" in text and "not found" not in text
+
+
+def test_out_pointing_at_a_directory_exits_3(use_catalogue, tmp_path, capsys):
+    cat = use_catalogue(phones(3))
+    assert galaxus.main(["search", "phone", "--out", str(tmp_path)]) == 3
+    assert cat.calls == []
+    assert "directory" in capsys.readouterr().err
+
+
+def test_count_without_range_uses_the_search_default_range(use_catalogue):
+    cat = use_catalogue(phones(3))
+    assert galaxus.main(["count", "phone"]) == 0
+    assert cat.calls == [(1, 1_000_000, 1)]
+    cat = use_catalogue(phones(3))
+    assert galaxus.main(["count", "phone", "--min", "50"]) == 0
+    assert cat.calls == [(50, 1_000_000, 1)]

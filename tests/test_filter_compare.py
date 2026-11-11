@@ -84,6 +84,19 @@ def test_parse_lookup():
         compare.parse_lookup("Acme Phone 20")
 
 
+@pytest.mark.parametrize("text", ["20=", "20=  ", "20=@120", "20= @120"])
+def test_parse_lookup_rejects_an_empty_query(text):
+    with pytest.raises(ValueError, match="query"):
+        compare.parse_lookup(text)
+
+
+def test_lookup_raises_on_error_message():
+    fake = FakeCatalogue([make_product(i, 100.0 + i) for i in range(1, 60)], error_on_call=1)
+    with pytest.raises(compare.LookupFailed, match="request failed"):
+        compare.lookup(lambda q: fake, 20, "Acme Phone 20", 120.0)
+    assert len(fake.calls) == 1
+
+
 def test_lookup_uses_narrow_band_first_and_at_most_three_calls():
     fake = FakeCatalogue([make_product(i, 100.0 + i) for i in range(1, 60)])
     found = compare.lookup(lambda q: fake, 20, "Acme Phone 20", 120.0)

@@ -147,6 +147,14 @@ def test_429_honours_retry_after():
     assert sleeps == [7.0]
 
 
+@pytest.mark.parametrize("value,expected", [("120", 30.0), ("-5", 0.0), ("30", 30.0), ("2.5", 2.5)])
+def test_retry_after_is_clamped_to_0_30(value, expected):
+    throttled = synthetic(429, headers={"content-type": "text/plain", "retry-after": value})
+    c, _, sleeps = client([rec(n) for n in HANDSHAKE] + [throttled, rec("success")])
+    c.search_products("Redmi 17", "en")
+    assert sleeps == [expected]
+
+
 def test_network_error_retries_then_raises():
     down = urllib.error.URLError("connection refused")
     c, _, sleeps = client([rec(n) for n in HANDSHAKE] + [down, down, rec("success")])

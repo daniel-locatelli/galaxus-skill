@@ -21,7 +21,13 @@ def parse_lookup(text: str) -> tuple[int, tuple[str, float | None]]:
         amount = float(price) if price else None
     except ValueError:
         raise ValueError(f"--lookup {text!r}: the price after @ must be a number") from None
+    if not query.strip():
+        raise ValueError(f"--lookup {text!r}: the query (BRAND NAME) must not be empty")
     return int(pid), (query.strip(), amount)
+
+
+class LookupFailed(Exception):
+    """Galaxus answered a lookup call with errorMessage: a failed lookup, not "not found"."""
 
 
 def lookup(fetch_for_query, pid: int, query: str, price: float | None, lang: str = "en") -> dict | None:
@@ -33,6 +39,8 @@ def lookup(fetch_for_query, pid: int, query: str, price: float | None, lang: str
                  (None, None)]
     for lo, hi in bands:
         page = fetch(lo, hi, 50)
+        if page.error:
+            raise LookupFailed(f"Galaxus search error: {page.error}")
         for p in page.products:
             if p.get("id") == pid:
                 return report.enrich_product(p, page.extras.get(pid), lang)

@@ -22,6 +22,8 @@ __version__ = "0.1.0"
 AGENT_INFO = f"galaxus-skill/{__version__}"
 LANGUAGES = ("en", "de", "fr", "it", "nl")
 EXIT_OK, EXIT_UNREACHABLE, EXIT_INPUT, EXIT_SEARCH = 0, 2, 3, 4
+MAX_LOOKUPS = 20
+DOCUMENT_KEYS = ("status", "bands", "histogram", "products", "version", "language")
 
 
 class _Parser(argparse.ArgumentParser):
@@ -34,12 +36,40 @@ def make_client() -> transport.Client:
     return transport.Client(AGENT_INFO)
 
 
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _check_payload(payload) -> None:
+    """A missing totalCount must never read as "0 found": raise TransportError on any odd shape."""
+    def bad(why):
+        raise transport.TransportError(f"unexpected response shape: {why}")
+    if not isinstance(payload, dict):
+        bad(f"payload is {type(payload).__name__}, not an object")
+    if payload.get("errorMessage"):
+        return  # a failed search; its other fields carry no information
+    total, products = payload.get("totalCount"), payload.get("products")
+    if not _is_int(total) or total < 0:
+        bad(f"totalCount is {total!r}")
+    if products is None and total == 0:
+        return
+    if not isinstance(products, list):
+        bad(f"products is {type(products).__name__}, not a list")
+    for p in products:
+        if not isinstance(p, dict) or not _is_int(p.get("id")):
+            bad("a product has no numeric id")
+
+
 def make_fetch(client, query: str, lang: str):
     def fetch(lo, hi, first):
         result = client.search_products(query, lang, first=first, min_price=lo, max_price=hi)
-        payload = result["payload"]
-        return searchmod.Page(total=payload.get("totalCount", 0), products=payload.get("products") or [],
-                              corrected=payload.get("correctedSearchTerm"), error=payload.get("errorMessage"),
+        payload = result.get("payload") if isinstance(result, dict) else None
+        _check_payload(payload)
+        error = payload.get("errorMessage") or None
+        products = payload.get("products")
+        return searchmod.Page(total=payload.get("totalCount") if _is_int(payload.get("totalCount")) else 0,
+                              products=products if isinstance(products, list) and not error else [],
+                              corrected=payload.get("correctedSearchTerm"), error=error,
                               extras=meta.product_extras(result.get("meta")))
     return fetch
 
@@ -65,8 +95,17 @@ def _write_json(path: str, doc: dict) -> None:
 def _read_json(path: str) -> dict:
     with open(path, encoding="utf-8") as fh:
         doc = json.load(fh)
-    if not isinstance(doc, dict) or not isinstance(doc.get("products"), list):
-        raise ValueError("not a galaxus.py search document (no products list)")
+    if not isinstance(doc, dict):
+        raise ValueError("not a galaxus.py search document (not a JSON object)")
+    missing = [k for k in DOCUMENT_KEYS if k not in doc]
+    if missing:
+        raise ValueError(f"not a galaxus.py search document (missing: {', '.join(missing)})")
+    for key in ("products", "bands", "histogram"):
+        if not isinstance(doc[key], list):
+            raise ValueError(f"not a galaxus.py search document ({key} is not a list)")
+    if doc["version"] != __version__:
+        print(f"warning: {path} was written by galaxus-skill {doc['version']}, this is {__version__}; "
+              f"search again if the output looks wrong", file=sys.stderr)
     return doc
 
 
@@ -85,10 +124,19 @@ def _positive(text: str) -> int:
     return value
 
 
+def _max_calls(text: str) -> int:
+    value = _positive(text)
+    if value > searchmod.MAX_CALLS_CAP:
+        raise argparse.ArgumentTypeError(f"must be at most {searchmod.MAX_CALLS_CAP} (fair use)")
+    return value
+
+
 def _check_out(path: str | None) -> str | None:
     """Error message if the --out parent directory is missing or not writable (never creates it)."""
     if not path:
         return None
+    if os.path.isdir(path):
+        return f"--out is a directory, not a file: {path}"
     parent = os.path.dirname(os.path.abspath(path))
     if not os.path.isdir(parent):
         return f"--out directory does not exist: {parent}"
@@ -110,10 +158,11 @@ def _price(text: str) -> int:
 # ---------------------------------------------------------------- commands
 
 def cmd_count(args) -> int:
-    if args.min and args.max and args.min > args.max:
+    lo, hi = args.min or searchmod.FULL_RANGE[0], args.max or searchmod.FULL_RANGE[1]  # same default as search
+    if lo > hi:
         return _fail(EXIT_INPUT, "--min must not exceed --max")
     try:
-        page = make_fetch(make_client(), args.query, args.lang)(args.min, args.max, 1)
+        page = make_fetch(make_client(), args.query, args.lang)(lo, hi, 1)
     except transport.TransportError as e:
         return _fail(EXIT_UNREACHABLE, f"Galaxus endpoint unreachable: {e}")
     except transport.ToolInputError as e:
@@ -198,6 +247,8 @@ def cmd_compare(args) -> int:
         lookups = dict(compare.parse_lookup(s) for s in args.lookup)
     except ValueError as e:
         return _fail(EXIT_INPUT, str(e))
+    if len(lookups) > MAX_LOOKUPS:
+        return _fail(EXIT_INPUT, f"--lookup: at most {MAX_LOOKUPS} ids per run (each costs up to 3 calls)")
     by_id = {p["id"]: p for p in doc["products"]}
     found, notes, client, failed = [], [], None, False
     for pid in ids:
@@ -211,9 +262,9 @@ def cmd_compare(args) -> int:
         query, price = lookups[pid]
         try:
             product = compare.lookup(lambda q: make_fetch(client, q, lang), pid, query, price, lang)
-        except (transport.TransportError, transport.ToolInputError) as e:
+        except (transport.TransportError, transport.ToolInputError, compare.LookupFailed) as e:
             notes.append(f"{pid}: lookup failed ({e})")
-            failed = failed or isinstance(e, transport.TransportError)
+            failed = failed or not isinstance(e, transport.ToolInputError)
             continue
         if product is None:
             notes.append(f"{pid}: not found (best-effort)")
@@ -245,7 +296,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("search", help="exhaustive search with a coverage report")
     _query_options(p)
-    p.add_argument("--max-calls", type=_positive, default=60)
+    p.add_argument("--max-calls", type=_max_calls, default=60,
+                   help=f"call budget (default 60, at most {searchmod.MAX_CALLS_CAP})")
     p.add_argument("--top", type=_positive, default=15, help="rows per product type in the printed report")
     p.add_argument("--out", help="write the full JSON document here (checkpointed after every call)")
     p.set_defaults(func=cmd_search)
