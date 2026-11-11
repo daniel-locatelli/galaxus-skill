@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 import galaxus
-from galaxus_lib import meta, transport
+from galaxus_lib import meta, report, transport
 from galaxus_lib.search import search
 
 pytestmark = pytest.mark.skipif(os.environ.get("GALAXUS_LIVE") != "1",
@@ -40,10 +40,26 @@ def test_min_above_max_is_input_error(client):
         client.search_products("Redmi 17", "en", min_price=5, max_price=2)
 
 
-def test_redmi17_search_is_complete():
-    res = search(galaxus.make_fetch(transport.Client(galaxus.AGENT_INFO), "Redmi 17", "en"), max_calls=60)
+def test_redmi17_narrow_range_is_complete():
+    res = search(galaxus.make_fetch(transport.Client(galaxus.AGENT_INFO), "Redmi 17", "en"),
+                 lo=150, hi=250, max_calls=60)
     assert res.status == "complete"
-    assert len(res.products) == res.root_total or res.final_total != res.root_total
+    assert len(res.products) == res.root_total
+
+
+def test_redmi17_full_search_is_honest():
+    res = search(galaxus.make_fetch(transport.Client(galaxus.AGENT_INFO), "Redmi 17", "en"), max_calls=60)
+    if res.status != "complete":
+        assert res.status == "partial"
+        open_bands = [b for b in res.bands if b.status != "complete"]
+        assert open_bands and all(b.status == "capped" and b.count is not None for b in open_bands)
+        missing = sum(max(0, b.count - 50) for b in open_bands)
+        assert len(res.products) + missing >= res.root_total
+        doc = report.build_document(res, "Redmi 17", "en", galaxus.__version__, "live-test")
+        text = " ".join(report.coverage_lines(doc))
+        assert "partial" in text and "capped" in text
+        for b in open_bands:
+            assert f"{b.lo}-{b.hi}" in text
 
 
 def test_cli_count_smoke():
