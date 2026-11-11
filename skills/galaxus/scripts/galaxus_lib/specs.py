@@ -37,6 +37,9 @@ NUM = r"(?<![\d.,'’])(\d{1,3}(?:[,.'’]\d{3})+(?!\d)|\d+(?:[.,]\d+)?)"
 
 def parse_number(text: str, lang: str) -> float:
     s = text.replace("'", "").replace("’", "")
+    if "," in s and "." in s:  # both present: the last one is the decimal mark
+        dec = "," if s.rfind(",") > s.rfind(".") else "."
+        return float(s.replace("." if dec == "," else ",", "").replace(dec, "."))
     if re.fullmatch(r"\d{1,3}(?:[,.]\d{3})+", s):
         sep = s[-4]
         if s.count(sep) > 1 or (sep == "," and lang == "en") or (sep == "." and lang != "en"):
@@ -49,9 +52,9 @@ def fmt(x: float) -> str:
     return str(int(x)) if x.is_integer() else f"{x:.2f}".rstrip("0").rstrip(".")
 
 
-def first_number(value: str) -> float | None:
-    m = re.search(r"\d+(?:\.\d+)?", value)
-    return float(m.group(0)) if m else None
+def first_number(value: str, lang: str = "en") -> float | None:
+    m = re.search(NUM, value)
+    return parse_number(m.group(1), lang) if m else None
 
 
 # ------------------------------------------------------------- properties
@@ -73,16 +76,24 @@ SCHEMAS = {
     "monitor": ("resolution", "screen"),
 }
 _TYPE_WORDS = (
-    ("phone", ("smartphone", "handy", "téléphone", "telefono", "telefoon")),
-    ("laptop", ("notebook", "laptop", "ordinateur portable", "portatile")),
-    ("monitor", ("monitor", "moniteur", "écran")),
+    ("phone", r"smartphones?|handys?|handies|téléphones?|telefono|telefoni|telefoon|telefoons"),
+    ("laptop", r"notebooks?|laptops?|portatil[ei]|ordinateurs? portables?"),
+    ("monitor", r"monitor[es]?|monitors|moniteurs?|écrans?"),
 )
+# Accessory words: a type containing one of these is never a device type.
+_ACCESSORY = re.compile(
+    r"(?<!\w)(?:hülle|huelle|case|cover|tasche|bag|sleeve|halter|halterung|mount|stand|"
+    r"schutz|protection|protector|folie|glass|kabel|cable|adapter|charger|ladegerät)"
+    r"(?:s|n|en|e)?(?!\w)")
+_NON_COLOUR = re.compile(r"^(?:wi-?fi|wlan|lte|nfc|esim|dual sim|single sim|5g|4g)$", re.I)
 
 
 def schema_for(product_type: str) -> str | None:
-    t = product_type.lower()
+    t = product_type.lower().replace(" ", " ")
+    if _ACCESSORY.search(t):
+        return None
     for schema, words in _TYPE_WORDS:
-        if any(w in t for w in words):
+        if re.search(rf"(?<!\w)(?:{words})(?!\w)", t):
             return schema
     return None
 
@@ -119,12 +130,13 @@ def parse_properties(properties: str, product_type: str) -> dict[str, str]:
     if schema is None:
         return out
     fields = SCHEMAS[schema]
-    size_fields = [f for f in fields if f in ("storage", "ram")]
-    if size_fields and len(sizes) == len(size_fields):
-        out.update(zip(size_fields, sizes))
-    elif size_fields and len(sizes) == 1:
-        is_storage = "ram" not in size_fields or _size_gb(sizes[0]) >= 128
-        out["storage" if is_storage else "ram"] = sizes[0]
-    if "colour" in fields and leftovers:
-        out["colour"] = " / ".join(leftovers)
+    if "storage" in fields and "ram" not in fields and len(sizes) == 1:
+        out["storage"] = sizes[0]
+    elif "ram" in fields and len(sizes) == 2:
+        small, large = sorted(sizes, key=_size_gb)
+        if _size_gb(small) <= 128 and _size_gb(large) >= 128 and _size_gb(large) > _size_gb(small):
+            out["ram"], out["storage"] = small, large
+    colours = [t for t in leftovers if not re.search(r"\d", t) and not _NON_COLOUR.match(t)]
+    if "colour" in fields and colours:
+        out["colour"] = " / ".join(colours)
     return out

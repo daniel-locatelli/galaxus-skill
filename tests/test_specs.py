@@ -54,3 +54,51 @@ def test_monitor_properties_en_and_de():
 def test_unknown_type_uses_generic_patterns_only():
     assert specs.parse_properties("Black, 128 GB", "Phone cases") == {}
     assert specs.parse_properties("", "Smartphones") == {}
+
+
+# ---- fix round 1
+
+@pytest.mark.parametrize("ptype, schema", [
+    ("Smartphone-Hüllen", None), ("Notebook bags", None), ("Monitor mounts", None),
+    ("Protection d'écran", None), ("Ordinateurs portables", "laptop"),
+    ("Portatili", "laptop"), ("Notebooks", "laptop"), ("Laptops", "laptop"),
+    ("Smartphones", "phone"), ("Handys", "phone"), ("Monitore", "monitor"),
+    ("Moniteurs", "monitor"), ("Smartphone", "phone"), ("Monitor", "monitor"),
+])
+def test_schema_for_whole_words_and_accessories(ptype, schema):
+    assert specs.schema_for(ptype) == schema
+
+
+def test_laptop_lone_size_token_is_not_guessed():
+    out = specs.parse_properties('64 GB, Silver, 11.60"', "Notebooks")
+    assert "ram" not in out and "storage" not in out
+
+
+@pytest.mark.parametrize("props", ['16 GB, 512 GB', '512 GB, 16 GB'])
+def test_laptop_two_sizes_by_plausibility(props):
+    out = specs.parse_properties(props, "Notebooks")
+    assert out["ram"] == "16 GB" and out["storage"] == "512 GB"
+
+
+def test_laptop_two_equal_sizes_assign_neither():
+    out = specs.parse_properties("256 GB, 256 GB", "Notebooks")
+    assert "ram" not in out and "storage" not in out
+
+
+def test_phone_colour_ignores_non_colour_tokens():
+    out = specs.parse_properties('Black, 5G NR, 6.1"', "Smartphones")
+    assert out["colour"] == "Black"
+    out = specs.parse_properties('128 GB, Blue, Wi-Fi, NFC, eSIM, 6.1"', "Smartphones")
+    assert out["colour"] == "Blue"
+
+
+def test_first_number_uses_language_aware_parsing():
+    assert specs.first_number("8,340 mAh") == 8340.0
+    assert specs.first_number("1,5 kg", "de") == 1.5
+    assert specs.first_number("6.9 inch") == 6.9
+    assert specs.first_number("none") is None
+
+
+def test_parse_number_mixed_separators():
+    assert specs.parse_number("1,234.56", "en") == 1234.56
+    assert specs.parse_number("1.234,56", "de") == 1234.56
