@@ -209,3 +209,11 @@ def test_histogram_error_is_recorded_but_status_stays_infeasible():
     res = search(huge)
     assert res.status == "infeasible"
     assert res.error == "boom"
+
+
+def test_last_checkpoint_after_failure_matches_partial_bands():
+    snaps = []
+    fake = catalogue([float(p) for p in range(1, 281)], order="asc", error_on_call=5)
+    with pytest.raises(SearchFailed) as info:
+        search(fake, lo=1, hi=1000, on_update=lambda r: snaps.append(list(r.bands)))
+    assert snaps[-1] == info.value.partial.bands

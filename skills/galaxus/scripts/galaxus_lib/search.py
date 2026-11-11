@@ -108,7 +108,7 @@ def search(fetch: Fetch, lo: int = 1, hi: int = 1_000_000, max_calls: int = 60,
         return res
 
     try:
-        _split(call, collect, fail, res, root)
+        _split(call, collect, fail, notify, res, root)
         # optional extras: an error or exception leaves the field None, status unchanged
         if (lo, hi) == FULL_RANGE and res.calls < max_calls:
             res.unfiltered_total = _count(call, None, None)
@@ -130,7 +130,7 @@ def _count(call, a, b) -> Optional[int]:
     return None if page.error else page.total
 
 
-def _split(call, collect, fail, res: SearchResult, root: Page) -> None:
+def _split(call, collect, fail, notify, res: SearchResult, root: Page) -> None:
     pending = [(res.lo, res.hi, root)]
     try:
         _split_loop(call, collect, fail, res, pending)
@@ -138,6 +138,7 @@ def _split(call, collect, fail, res: SearchResult, root: Page) -> None:
         # mid-run failure: the in-flight band and everything pending is unsearched
         res.bands.extend(Band(a, b, None, "uncovered") for a, b, _ in pending)
         res.bands.sort(key=lambda band: (band.lo, band.hi))
+        notify()  # checkpoint again so it carries the uncovered bands
         raise
     res.bands.sort(key=lambda band: (band.lo, band.hi))
     res.status = "complete" if all(band.status == "complete" for band in res.bands) else "partial"
