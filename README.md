@@ -19,6 +19,11 @@ answers "no". This skill:
 - shows availability and discounts from an undocumented field, labelled as
   such (script path only).
 
+It cannot find specs the endpoint does not send. The site's "Android 17"
+filter lists a Samsung Galaxy A18 at CHF 189, but its MCP record never
+mentions the OS, so the skill reports it as "unknown, could qualify" rather
+than as a match. See [docs/findings-2026-11-11.md](docs/findings-2026-11-11.md).
+
 ## Install
 
 ### Claude Code
