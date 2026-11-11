@@ -1,5 +1,7 @@
 # Galaxus skill — design
 
+> Erratum (2026-11-11, after build): the call estimate is now ceil(3.5·N/50)+2, uncovered-band labels and the manual-path gate changed; skills/galaxus/SKILL.md is authoritative.
+
 Date: 2026-11-11 (rev. 2, after adversarial review)
 Status: approved (2026-11-11)
 

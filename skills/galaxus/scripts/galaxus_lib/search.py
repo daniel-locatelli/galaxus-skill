@@ -23,9 +23,11 @@ EXTRA_CALLS = 2
 MAX_CALLS_CAP = 300  # --max-calls upper bound (fair use)
 
 
+FULL_RANGE = (1, 1_000_000)
+
+
 def estimate_calls(total: int) -> int:
     return math.ceil(CALLS_PER_PAGE * total / PAGE_SIZE) + EXTRA_CALLS
-FULL_RANGE = (1, 1_000_000)
 
 
 @dataclass
@@ -118,7 +120,9 @@ def search(fetch: Fetch, lo: int = 1, hi: int = 1_000_000, max_calls: int = 60,
     collect(root)
 
     res.estimated_calls = estimate_calls(root.total)
-    if res.estimated_calls > max_calls:
+    holds_all = root.total <= PAGE_SIZE and len(root.products) == root.total
+    # the optional extra count calls are budget-guarded, so they do not make a run infeasible
+    if not holds_all and res.estimated_calls - EXTRA_CALLS > max_calls:
         res.status = "infeasible"
         _histogram(call, res)
         notify()

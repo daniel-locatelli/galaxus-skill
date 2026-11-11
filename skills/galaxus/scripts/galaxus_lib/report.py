@@ -127,7 +127,8 @@ def coverage_lines(doc: dict) -> list[str]:
                     ("uncovered", "not fully searched (budget or failure)")):
         bands = [b for b in doc["bands"] if b["status"] == st]
         if bands:
-            lines.append(f"  {st} ({why}): " + ", ".join(f"{b['lo']}-{b['hi']} CHF {_band_count(b)}" for b in bands))
+            label = f"{st} — {why}" if st == "uncovered" else f"{st} ({why})"
+            lines.append(f"  {label}: " + ", ".join(f"{b['lo']}-{b['hi']} CHF {_band_count(b)}" for b in bands))
     final, unfiltered = _num(doc.get("finalTotal")), _num(doc.get("unfilteredTotal"))
     total_n = _num(total)
     if final is not None and total_n is not None and final != total_n:

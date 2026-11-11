@@ -271,3 +271,24 @@ def test_band_is_kept_in_partial_when_split_fails(monkeypatch):
     bands = info.value.partial.bands
     assert [(b.lo, b.hi, b.status) for b in bands] == [(1, 1000, "uncovered")]
     assert bands[0].count == 120  # fetched, not split: count known, up to 50 kept
+
+
+@pytest.mark.parametrize("max_calls", [1, 2, 3, 4])
+def test_tiny_query_is_never_infeasible_with_small_budget(max_calls):
+    res = search(catalogue([10.0 + i for i in range(30)]), lo=1, hi=1000, max_calls=max_calls)
+    assert res.status == "complete" and len(res.products) == 30
+
+
+def test_zero_matches_with_one_call_budget_is_complete():
+    res = search(catalogue([]), lo=1, hi=1000, max_calls=1)
+    assert res.status == "complete" and res.root_total == 0
+
+
+def test_gate_ignores_optional_extra_calls():
+    def fixed(total):
+        def fetch(lo, hi, first):
+            return Page(total=total, products=[make_product(i, 200.0 + i) for i in range(min(first, 50))])
+        return fetch
+    # 959 needs 68 band calls (+2 optional): infeasible at 60 but not judged on the extras at 68
+    assert search(fixed(959), max_calls=60).status == "infeasible"
+    assert search(fixed(959), max_calls=68).status != "infeasible"

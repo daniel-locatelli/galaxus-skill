@@ -98,8 +98,9 @@ excluded.` and a `Verdict:` line when nothing matches.
 **compare** builds a spec table for `--ids` from the file. For an id that is
 not in the file add `--lookup ID=BRAND NAME@PRICE` (price optional): it
 searches for that product near the price, best-effort (at most 20 lookups),
-and prints a note when not found; a Galaxus error prints `lookup failed` and
-exits 4. Galaxus search does not find products by id. A FILE written by
+and prints a note when not found. A transport failure or `errorMessage`
+exits 4; input rejected by Galaxus is reported in a `lookup failed` note and
+exits 0. Galaxus search does not find products by id. A FILE written by
 another skill version gives a warning on stderr.
 
 **Exit codes**
@@ -109,7 +110,7 @@ another skill version gives a warning on stderr.
 | 0 | ok, including `partial` and `infeasible` | read the coverage line |
 | 2 | endpoint unreachable, or an unexpected response shape, on the first call | switch to the manual path |
 | 3 | invalid input (bad option, unknown field, `--min` > `--max`, `--max-calls` > 300, > 20 `--lookup`, `--out` is a directory, input rejected by Galaxus, unreadable or incomplete FILE) | fix the arguments |
-| 4 | Galaxus search error, failure or unexpected response mid-run, `--out` not writable at the end, or a failed `compare --lookup` | report a failed search with the partial report; stay on the script path (the manual path hits the same server) |
+| 4 | Galaxus search error, failure or unexpected response mid-run, `--out` not writable at the end, or a `compare --lookup` transport failure or `errorMessage` (input rejected by Galaxus is a note, exit 0) | report a failed search with the partial report; stay on the script path (the manual path hits the same server) |
 
 ## 4. Report to the user
 

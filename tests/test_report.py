@@ -59,7 +59,7 @@ def test_coverage_partial_lists_band_problems():
     text = "\n".join(report.coverage_lines(d))
     assert text.startswith("Coverage: partial. 0 unique products found of 400 reported")
     assert "capped (more than 50 products within 1 CHF; 50 kept): 163-164 CHF (165)" in text
-    assert "uncovered (not fully searched (budget or failure)): 500-1000000 CHF (count unknown)" in text
+    assert "uncovered — not fully searched (budget or failure): 500-1000000 CHF (count unknown)" in text
 
 
 def test_coverage_infeasible_shows_histogram_and_no_rows():
