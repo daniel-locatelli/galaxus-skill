@@ -1,7 +1,7 @@
 # Galaxus skill — design
 
 Date: 2026-11-11 (rev. 2, after adversarial review)
-Status: revised, awaiting spec review
+Status: approved (2026-11-11)
 
 ## Context
 
