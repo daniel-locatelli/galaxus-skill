@@ -44,6 +44,24 @@ def _as_float(text: str) -> float | None:
     return n if math.isfinite(n) else None
 
 
+_WEIGHT_COND = re.compile(r"\s*(\d+(?:[.,]\d+)?)\s*(kg|g)?\s*", re.I)
+_WEIGHT_SPEC = re.compile(r"\s*(\d+(?:[.,]\d+)?)\s*(kg|g)\s*", re.I)
+
+
+def _weight_grams(text: str, need_unit: bool) -> float | None:
+    """Weight in grams; a bare number is grams unless `need_unit`. Any other unit gives None."""
+    m = (_WEIGHT_SPEC if need_unit else _WEIGHT_COND).fullmatch(text)
+    if m is None:
+        return None
+    n = float(m.group(1).replace(",", "."))
+    return n * 1000 if (m.group(2) or "g").lower() == "kg" else n
+
+
+def _network(text: str) -> str:
+    text = text.strip().lower()
+    return "4g" if text == "lte" else text
+
+
 def parse_where(expr: str) -> Condition:
     usage = f"cannot parse --where {expr!r}; use FIELD=VALUE, FIELD~TEXT, FIELD>=N or FIELD<=N"
     for op in _OPS:
@@ -56,13 +74,18 @@ def parse_where(expr: str) -> Condition:
                 raise ValueError(f"unknown field {name!r}; valid fields: {', '.join(specs.FIELD_ORDER)}")
             if op != "~" and _COMMA_NUMBER.fullmatch(value):
                 value = value.replace(",", ".")
-            if op in (">=", "<=") and _as_float(value) is None:
+            if op in (">=", "<=") and name == "weight":
+                if _weight_grams(value, False) is None:
+                    raise ValueError(f"{usage}; weight needs a number in grams or with a g/kg unit")
+            elif op in (">=", "<=") and _as_float(value) is None:
                 raise ValueError(f"{usage}; {op} needs a finite number")
             return Condition(name, op, value)
     raise ValueError(usage)
 
 
 def _number(cond: Condition, value: str) -> float | None:
+    if cond.field == "weight":
+        return _weight_grams(value, True)
     number = specs.first_number(value)
     if number is not None and cond.field in _SIZE_FIELDS and re.search(r"\bTB\b", value, re.I):
         number *= 1000  # compare storage/RAM in GB
@@ -77,15 +100,21 @@ def evaluate(cond: Condition, spec: dict | None) -> str:
         number = _number(cond, value)
         if number is None:
             return UNKNOWN
-        want = float(cond.value)
+        want = _weight_grams(cond.value, False) if cond.field == "weight" else float(cond.value)
+        if want is None:
+            return UNKNOWN
         ok = number >= want if cond.op == ">=" else number <= want
         if spec.get("ceiling"):  # the real value is at most `number`
-            return FAIL if cond.op == ">=" and not ok else UNKNOWN
+            if cond.op == "<=":
+                return MATCH if ok else UNKNOWN  # true value cannot exceed `number`
+            return FAIL if not ok else UNKNOWN
         return MATCH if ok else FAIL
     if spec.get("ceiling"):
         return UNKNOWN
     if cond.op == "=":
-        want_number = _as_float(cond.value)
+        if cond.field == "network":
+            return MATCH if _network(value) == _network(cond.value) else FAIL
+        want_number = _weight_grams(cond.value, False) if cond.field == "weight" else _as_float(cond.value)
         if want_number is not None:
             number = _number(cond, value)
             if number is None:

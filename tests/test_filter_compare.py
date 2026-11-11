@@ -168,3 +168,51 @@ def test_lookup_enriches_specs_for_the_table():
     found = compare.lookup(lambda q: fake, 20, "Acme Phone 20", 120.0, "en")
     assert "specs" in found and "extras" in found
     assert "| network | 5G |" in compare.comparison_table([found])
+
+
+# ---- fixes A: weight units, network, ceilings with <=
+
+@pytest.mark.parametrize("cond, s, expected", [
+    ("weight<=1500", spec("1400 g"), "match"),
+    ("weight<=1.5", spec("1400 g"), "fail"),  # bare numbers are grams
+    ("weight<=1500", spec("1.4 kg"), "match"),
+    ("weight<=1.5kg", spec("1400 g"), "match"),
+    ("weight<=1500g", spec("1.6 kg"), "fail"),
+    ("weight<=1.5kg", spec("1.6 kg"), "fail"),
+    ("weight>=150", spec("190 g"), "match"),
+    ("weight<=1500", spec("3 lb"), "unknown"),
+    ("weight<=1500", spec("heavy"), "unknown"),
+    ("weight=190", spec("190 g"), "match"),
+])
+def test_weight_is_compared_in_grams(cond, s, expected):
+    assert filtering.evaluate(filtering.parse_where(cond), s) == expected
+
+
+def test_weight_condition_with_bad_unit_is_rejected():
+    with pytest.raises(ValueError):
+        filtering.parse_where("weight<=2lb")
+
+
+@pytest.mark.parametrize("cond, s, expected", [
+    ("network=4G", spec("LTE"), "match"),
+    ("network=5G", spec("LTE"), "fail"),
+    ("network=LTE", spec("4G"), "match"),
+    ("network=4G", spec("5G"), "fail"),
+])
+def test_lte_counts_as_4g(cond, s, expected):
+    assert filtering.evaluate(filtering.parse_where(cond), s) == expected
+
+
+@pytest.mark.parametrize("cond, s, expected", [
+    ("refresh<=144", spec("120 Hz", ceiling=True), "match"),
+    ("refresh<=120", spec("120 Hz", ceiling=True), "match"),
+    ("refresh<=60", spec("120 Hz", ceiling=True), "unknown"),
+])
+def test_ceiling_with_upper_bound(cond, s, expected):
+    assert filtering.evaluate(filtering.parse_where(cond), s) == expected
+
+
+def test_ceiling_match_counts_as_inferred_only_when_inferred():
+    p = prod(1, refresh=spec("120 Hz", state="inferred", ceiling=True))
+    out = filtering.run_filter(doc([p]), [filtering.parse_where("refresh<=144")])
+    assert len(out.matched) == 1 and out.inferred == 1

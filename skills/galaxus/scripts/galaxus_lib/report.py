@@ -224,6 +224,8 @@ def _rating(group: list[dict]) -> str:
     if not rated:
         return ""
     best = max(rated, key=lambda r: _num(r.get("ratingCount")) or 0)
+    if _num(best.get("averageRating")) is None or not _num(best.get("ratingCount")):
+        return ""
     return f"rating {best.get('averageRating')} ({best.get('ratingCount')})"
 
 

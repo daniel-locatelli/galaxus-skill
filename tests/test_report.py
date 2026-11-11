@@ -201,3 +201,15 @@ def test_failed_without_message_and_count_formatting_and_partial_discount():
     a, b = redmi(1, 164, "256 GB", "Blue"), redmi(2, 187, "128 GB", "Black")
     a["extras"] = {"insteadOf": {"rebate": 8, "price": 178}}
     assert "was 178* (some variants)" in report.format_row([a, b])
+
+
+def test_row_omits_missing_or_empty_rating():
+    for rating in (None, {"averageRating": None, "ratingCount": None}, {"averageRating": 0, "ratingCount": 0}):
+        p = make_product(1, 100.0)
+        p["ratingSummaryIfAvailable"] = rating
+        p["specs"] = {}
+        assert "rating" not in report.format_row([p])
+    p = make_product(2, 100.0)
+    p["ratingSummaryIfAvailable"] = {"averageRating": 4.5, "ratingCount": 12}
+    p["specs"] = {}
+    assert "rating 4.5 (12)" in report.format_row([p])
