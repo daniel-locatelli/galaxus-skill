@@ -114,6 +114,8 @@ search (`--max-calls` at most 300; `compare` at most 20 lookups); a server
 
 ## Open items
 
+Endpoint findings and suggestions for Galaxus: [docs/findings-2026-11-11.md](docs/findings-2026-11-11.md).
+
 Not resolved at the time of writing:
 
 - Galaxus terms of use for automated MCP use were not found or checked.
