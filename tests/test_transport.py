@@ -165,3 +165,54 @@ def test_delay_between_tool_calls():
     c.search_products("Redmi 17", "en")
     assert sleeps == [0.2]
     assert c.calls == 2
+
+
+def sse_result(rid, text):
+    msg = {"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": text}]}}
+    return {"status": 200, "headers": {"content-type": "text/event-stream"},
+            "body": "event: message\ndata: " + json.dumps(msg) + "\n\n"}
+
+
+def test_invalid_json_in_sse_raises_transport_error():
+    bad = {"status": 200, "headers": {"content-type": "text/event-stream"}, "body": "data: {not json\n\n"}
+    c, _, _ = client([rec(n) for n in HANDSHAKE] + [bad])
+    with pytest.raises(transport.TransportError, match="malformed"):
+        c.search_products("x", "en")
+
+
+def test_non_utf8_body_raises_transport_error():
+    class BadResponse(FakeResponse):
+        def read(self):
+            return b"\xff\xfe\xfa"
+
+    class Op(FakeOpener):
+        def __call__(self, req, timeout):
+            item = self.script[0]
+            if isinstance(item, dict) and item.get("bad"):
+                self.script.pop(0)
+                self.requests.append(req)
+                return BadResponse(item)
+            return super().__call__(req, timeout)
+
+    op = Op([rec(n) for n in HANDSHAKE] + [dict(synthetic(200), bad=True)])
+    c = transport.Client("galaxus-skill/test", opener=op, sleep=lambda s: None)
+    with pytest.raises(transport.TransportError, match="UTF-8"):
+        c.search_products("x", "en")
+
+
+def test_non_json_tool_text_raises_transport_error():
+    c, _, _ = client([rec(n) for n in HANDSHAKE] + [sse_result(2, "not json at all")])
+    with pytest.raises(transport.TransportError, match="not JSON"):
+        c.search_products("x", "en")
+
+
+def test_non_dict_message_is_skipped():
+    arr = {"status": 200, "headers": {"content-type": "application/json"}, "body": "[1, 2]"}
+    c, _, _ = client([rec(n) for n in HANDSHAKE] + [arr])
+    with pytest.raises(transport.TransportError, match="no JSON-RPC response"):
+        c.search_products("x", "en")
+
+
+def test_parse_sse_keeps_unicode_line_separators_inside_data():
+    body = 'data: {"a": "x y\u0085z"}\n\n'
+    assert transport.parse_sse(body) == [{"a": "x y\u0085z"}]

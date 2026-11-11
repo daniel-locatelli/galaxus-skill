@@ -28,17 +28,24 @@ class ToolInputError(Exception):
     """The server rejected the tool input (isError result or JSON-RPC error)."""
 
 
+def _loads(text: str):
+    try:
+        return json.loads(text)
+    except ValueError as err:
+        raise TransportError(f"malformed JSON in response: {err}") from err
+
+
 def parse_sse(body: str) -> list[dict]:
     messages, data = [], []
-    for line in body.splitlines():
+    for line in body.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         if line.startswith("data:"):
             value = line[5:]
             data.append(value[1:] if value.startswith(" ") else value)
         elif line == "" and data:
-            messages.append(json.loads("\n".join(data)))
+            messages.append(_loads("\n".join(data)))
             data = []
     if data:
-        messages.append(json.loads("\n".join(data)))
+        messages.append(_loads("\n".join(data)))
     return messages
 
 
@@ -47,7 +54,7 @@ def parse_body(content_type: str | None, body: str) -> list[dict]:
         return []
     if content_type and "text/event-stream" in content_type:
         return parse_sse(body)
-    return [json.loads(body)]
+    return [_loads(body)]
 
 
 def _retry_after(headers, default: float) -> float:
@@ -88,7 +95,10 @@ class Client:
                                      headers=headers, method="POST")
         resp = self._open(req, timeout=TIMEOUT_S)
         try:
-            body = resp.read().decode("utf-8")
+            try:
+                body = resp.read().decode("utf-8")
+            except UnicodeDecodeError as err:
+                raise TransportError(f"response body is not valid UTF-8: {err}") from err
             lowered = {k.lower(): v for k, v in resp.headers.items()}
         finally:
             resp.close()
@@ -151,7 +161,7 @@ class Client:
         _, messages = self._send({"jsonrpc": "2.0", "id": rid, "method": "tools/call",
                                   "params": {"name": "search_products", "arguments": args}})
         self.calls += 1
-        msg = next((m for m in messages if m.get("id") == rid), None)
+        msg = next((m for m in messages if isinstance(m, dict) and m.get("id") == rid), None)
         if msg is None:
             raise TransportError("no JSON-RPC response for the tool call")
         if "error" in msg:
@@ -160,4 +170,8 @@ class Client:
         text = "".join(c.get("text", "") for c in result.get("content", []) if c.get("type") == "text")
         if result.get("isError"):
             raise ToolInputError(text)
-        return {"payload": json.loads(text), "meta": result.get("_meta")}
+        try:
+            payload = json.loads(text)
+        except ValueError as err:
+            raise TransportError(f"tool result text is not JSON: {err}") from err
+        return {"payload": payload, "meta": result.get("_meta")}
