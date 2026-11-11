@@ -90,3 +90,11 @@ For any "found" or "none" claim, check galaxus.ch by hand and record it here
 
 | Date | Case | Skill | Run | Coverage line | No false "none" | No spec tokens | Found | Checked by hand | Notes |
 |---|---|---|---|---|---|---|---|---|---|
+| 2026-11-11 | 1 | with | 1 | yes: complete 610/610, 32 calls | yes | yes ("Samsung smartphone") | 7 confirmed (A26 256 GB, A36 256 GB, A56 ×5); 85 unknown listed as candidates | no | Used `filter` with two `--where`; type exclusions stated. Pass. |
+| 2026-11-11 | 1 | without | 1 | no ("looked at the top 50" of 286) | n/a | no (query "Samsung Galaxy smartphone 8 GB RAM Android 15") | A56, A36, S25 FE, S25, A57/A37 | no | Filled RAM/Android from model knowledge ("I believe"); sent `userIntent`. Baseline. |
+| 2026-11-11 | 2 | with | 1 | yes: complete 542/542 (150–250) and 415/415 (100–149) | yes | yes for searches (one exploratory `count` with "144 Hz", not used) | 243 confirmed ≥144 Hz, 336 unknown | no | Counted first, found 100–250 over budget, then split it into two searches (70 calls total) without the user's agreement: passes the letter of the criterion, not its intent. Below CHF 100 stated as not searched. Pass with note. |
+| 2026-11-11 | 2 | without | 1 | no ("74 matches, looked at 30 … a good sample") | n/a | no (query "27 inch monitor 144 Hz") | 5 QHD + 3 FHD picks | no | One call; spec tokens in query. Baseline. |
+| 2026-11-11 | 5 | with | 1 | yes: partial 310/388, 16 calls; capped 19–20 (72), 21–22 (78), 22–23 (78) | yes ("can't confirm … can't say none exists") | yes ("Redmi 17", model named) | accessories only | no | Named the unsearched bands, offered narrower query / range above CHF 23, no budget raise without consent. Pass. |
+| 2026-11-11 | 5 | without | 1 | no (said "only looked at the first page") | yes (hedged) | yes | cases; phone from CHF 154 | no | 2 calls; honest about one page but no coverage numbers. Baseline. |
+
+Round 1 of 3 only (one run per case and condition). Finding from case 2: SKILL.md does not say the call budget covers the whole answer, so an agent can split an over-budget range into several runs instead of asking.
