@@ -539,3 +539,36 @@ def test_guard_res_not_third_dimension_integers():
 
 def test_guard_res_part_decimal_without_unit():
     assert "resolution" not in desc("Grösse 162,4 x 75,7 laut Hersteller.", "de")
+
+
+# ---- Task 7 fix round 3
+
+@pytest.mark.parametrize("text, lang", [("The monitor speakers cover a frequency range of 20 Hz.", "en"),
+                                        ("Der Monitor-Lautsprecher bietet 20 Hz bis 20 kHz.", "de"),
+                                        ("Übertragungsbereich 20 Hz.", "de"),
+                                        ("Plage de fréquences de 20 Hz.", "fr"),
+                                        ("Gamma di frequenza 20 Hz.", "it")])
+def test_audio_frequency_is_not_refresh(text, lang):
+    assert "refresh" not in desc(text, lang)
+
+
+def test_speakers_next_to_display_refresh_keep_refresh():
+    assert desc("Stereo speakers and a 120 Hz display.")["refresh"] == ("120 Hz", False)
+
+
+def test_expand_to_article_only_in_it_fr():
+    assert desc("It has a 128 GB expandable storage.")["storage"] == ("128 GB", False)
+    assert desc("Memoria interna espandibile a 1 TB.", "it")["storage"] == ("1 TB", True)
+
+
+def test_nearest_keyword_wins_among_ram_candidates():
+    # 8 GB binds "working memory" at distance 9, 16 GB binds "RAM" at distance 1.
+    assert desc("With 8 GB of fast working memory and 16 GB RAM.")["ram"] == ("16 GB", False)
+
+
+def test_uppercase_max_dot_is_ceiling():
+    assert desc("Refresh rate MAX. 120 Hz.")["refresh"] == ("120 Hz", True)
+
+
+def test_german_hz_before_display():
+    assert desc("Das 144 Hz Display überzeugt.", "de")["refresh"] == ("144 Hz", False)

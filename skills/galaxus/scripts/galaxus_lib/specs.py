@@ -156,10 +156,13 @@ _KW = {
                 "de": [r"\bbildwiederhol\w*", r"\bwiederholrate", r"\bbildschirm"],
                 "fr": [r"rafra[iî]chissement", r"\bécran"], "it": [r"\baggiornamento", r"\bschermo"],
                 "nl": [r"\bverversing\w*", r"\bscherm"]},
-    "_not_refresh": {"en": [r"\btouch[- ]?sampling", r"\bsampling", r"\bfrequency response", r"\bpwm\b",
-                            r"\bdimming"],
-                     "de": [r"\babtast\w*", r"\bfrequenzgang"], "fr": [r"réponse en fréquence", r"échantillonnage"],
-                     "it": [r"risposta in frequenza", r"\bcampionamento"], "nl": [r"\bfrequentiebereik"]},
+    "_not_refresh": {"en": [r"\btouch[- ]?sampling", r"\bsampling", r"\bfrequency response", r"\bfrequency range",
+                            r"\bpwm\b", r"\bdimming", r"\bspeakers?"],
+                     "de": [r"\babtast\w*", r"\bfrequenzgang", r"\bfrequenzbereich", r"\bübertragungsbereich",
+                            r"\w*lautsprecher\w*"],
+                     "fr": [r"réponse en fréquence", r"échantillonnage", r"plage de fréquences?", r"haut-parleurs?"],
+                     "it": [r"risposta in frequenza", r"\bcampionamento", r"gamma di frequenz\w*", r"altoparlant\w*"],
+                     "nl": [r"\bfrequentiebereik", r"\bluidspreker\w*"]},
     "camera": {"en": [r"\w*camera"], "de": [r"\w*kamera"], "fr": [r"caméra"], "it": [r"\w*camera"],
                "nl": [r"\w*camera"]},
     # Whole phrases, so plain "camera"/"Kamera" cannot bind the selfie value on its own.
@@ -179,7 +182,7 @@ _KW = {
 }
 
 # A value right after one of these is a range/ceiling, not this variant's value.
-_CEILING = (r"up to", r"bis zu", r"\bbis\b", r"jusqu.à", r"fino a", r"(?-i:\bmax\.)\s*$", r"\bmaxim(?:um|al)\w*",
+_CEILING = (r"up to", r"bis zu", r"\bbis\b", r"jusqu.à", r"fino a", r"(?-i:\b(?:max|MAX)\.)\s*$", r"\bmaxim(?:um|al)\w*",
             r"memory extension", r"speichererweiterung", r"configurations", r"konfigurationen")
 _CEILING_LANG = {"nl": (r"\btot\b",)}
 # Only the expansion target is a ceiling: "erweiterbar auf 1 TB", "auf 1 TB erweiterbar". The base
@@ -187,8 +190,10 @@ _CEILING_LANG = {"nl": (r"\btot\b",)}
 _EXPAND_WORD = r"(?:expandable|erweiterbar|extensible|espandibile|uitbreidbaar)"
 _EXPAND_BEFORE = re.compile(_EXPAND_WORD + r"(?:\s+(?:up to|to|auf|bis|jusqu.à|à|fino a|a|tot))?\s+$", re.I)
 _EXPAND_AFTER = re.compile(r"\s*" + _EXPAND_WORD, re.I)
-_EXPAND_TO = re.compile(r"\b(?:auf|to|à|a|tot)\s+$", re.I)
-_BOUNDARY = re.compile(r"(?<!\bmax)(?<!\bca)[.!?](?=\s|$)|\n|•|;")  # case-sensitive: "Pro Max." ends a sentence
+# Word before an expansion target; English "to" always applies, the articles-looking "a"/"à" only in it/fr.
+_EXPAND_TO = {"de": r"auf", "fr": r"à|jusqu.à", "it": r"a|fino a", "nl": r"tot"}
+# Case-sensitive: "max." / "MAX." are abbreviations, "Pro Max." ends a sentence.
+_BOUNDARY = re.compile(r"(?<!\bmax)(?<!\bMAX)(?<!\bca)[.!?](?=\s|$)|\n|•|;")
 _WINDOW = 40
 # Connector words a keyword absorbs on its right: "RAM: 8 GB", "refresh rate of 120 Hz".
 _CONNECT = re.compile(r"(?:\s*(?:[:=]|\b(?:rate|of|von|de|du|di|van)\b))*", re.I)
@@ -298,7 +303,8 @@ def _is_ceiling(text: str, start: int, end: int, unit: str, lang: str) -> bool:
         if len(units) == len(nums) and all(_family(u) == _family(unit) for u in units):
             return True
     return bool(_EXPAND_BEFORE.search(before)
-                or (_EXPAND_AFTER.match(text, end) and _EXPAND_TO.search(before)))
+                or (_EXPAND_AFTER.match(text, end)
+                    and re.search(r"\b(?:to|" + _EXPAND_TO.get(lang, "to") + r")\s+$", before, re.I)))
 
 
 def _rx(unit: str, flags=re.I):
