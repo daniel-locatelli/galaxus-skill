@@ -1,0 +1,18 @@
+{
+ "status": 200,
+ "headers": {
+  "content-type": "text/event-stream",
+  "access-control-allow-origin": "*",
+  "access-control-expose-headers": "Mcp-Session-Id",
+  "x-envoy-upstream-service-time": "1",
+  "vary": "Accept-Encoding",
+  "expires": "Wed, 11 Nov 2026 16:44:29 GMT",
+  "cache-control": "max-age=0, no-cache, no-store",
+  "pragma": "no-cache",
+  "date": "Wed, 11 Nov 2026 16:44:29 GMT",
+  "content-length": "190",
+  "connection": "close",
+  "strict-transport-security": "max-age=31536000 ; includeSubDomains ; preload"
+ },
+ "body": "event: message\ndata: {\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Tool failed: Invalid price range: minPrice (5) must be lower than maxPrice (2).\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":2}\n\n"
+}

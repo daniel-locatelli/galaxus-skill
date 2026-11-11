@@ -1,0 +1,18 @@
+{
+ "status": 200,
+ "headers": {
+  "content-type": "text/event-stream",
+  "access-control-allow-origin": "*",
+  "access-control-expose-headers": "Mcp-Session-Id",
+  "x-envoy-upstream-service-time": "2",
+  "vary": "Accept-Encoding",
+  "expires": "Wed, 11 Nov 2026 16:44:29 GMT",
+  "cache-control": "max-age=0, no-cache, no-store",
+  "pragma": "no-cache",
+  "date": "Wed, 11 Nov 2026 16:44:29 GMT",
+  "content-length": "763",
+  "connection": "close",
+  "strict-transport-security": "max-age=31536000 ; includeSubDomains ; preload"
+ },
+ "body": "event: message\ndata: {\"result\":{\"_meta\":{\"toolName\":\"search_products\",\"response\":{\"data\":{\"serverToolShopSearch\":{\"additionalQueryInfo\":null,\"products\":null,\"id\":\"U2hvcFNlYXJjaFJlc3VsdApkH4sIAAAAAAAAA6tWCixNLapUslKqUNJRCk5NLErOAIs45+elZaYrWVUrBWdnFgSlpmQWpSaXKFmVFJWm1tYCAM3Deew3AAAA\"}}},\"params\":{\"id\":\"4c4ffb1badd35279215a77ce6b160f56\",\"metadata\":{},\"name\":\"searchProductsAppToolQuery\",\"operationKind\":\"query\",\"text\":null},\"variables\":{\"query\":\"x\",\"first\":1,\"filters\":null},\"locale\":\"en-CH\",\"websiteUrl\":\"https://www.galaxus.ch\"},\"content\":[{\"type\":\"text\",\"text\":\"{\\\"errorMessage\\\":\\\"The request failed unexpectedly. No products are returned. Please try again later.\\\",\\\"correctedSearchTerm\\\":null,\\\"totalCount\\\":0,\\\"products\\\":[]}\"}]},\"jsonrpc\":\"2.0\",\"id\":2}\n\n"
+}
