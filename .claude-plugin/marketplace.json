@@ -1,0 +1,12 @@
+{
+  "name": "galaxus-skill",
+  "owner": { "name": "Daniel Locatelli" },
+  "plugins": [
+    {
+      "name": "galaxus",
+      "source": "./",
+      "description": "Exhaustive Galaxus product search with coverage reporting and spec extraction.",
+      "version": "0.1.0"
+    }
+  ]
+}

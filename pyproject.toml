@@ -1,0 +1,4 @@
+# pytest configuration only; the skill script itself has no dependencies.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
