@@ -572,3 +572,15 @@ def test_uppercase_max_dot_is_ceiling():
 
 def test_german_hz_before_display():
     assert desc("Das 144 Hz Display überzeugt.", "de")["refresh"] == ("144 Hz", False)
+
+
+# ---- Task 7 fix round 4
+
+@pytest.mark.parametrize("text, field, value", [
+    ("Bildwiederholrate: Max. 120 Hz.", "refresh", ("120 Hz", True)),
+    ("Display mit Max. 144 Hz", "refresh", ("144 Hz", True)),
+    ("The iPhone 16 Pro Max. 256 GB storage.", "storage", ("256 GB", False)),
+    ("Das Galaxy S26 Ultra Max. 512 GB Speicher.", "storage", ("512 GB", False)),
+])
+def test_titlecase_max_dot(text, field, value):
+    assert desc(text, "de")[field] == value

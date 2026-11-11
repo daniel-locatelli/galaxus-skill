@@ -182,7 +182,7 @@ _KW = {
 }
 
 # A value right after one of these is a range/ceiling, not this variant's value.
-_CEILING = (r"up to", r"bis zu", r"\bbis\b", r"jusqu.à", r"fino a", r"(?-i:\b(?:max|MAX)\.)\s*$", r"\bmaxim(?:um|al)\w*",
+_CEILING = (r"up to", r"bis zu", r"\bbis\b", r"jusqu.à", r"fino a", r"(?-i:\b(?:max|Max|MAX)\.)\s*$", r"\bmaxim(?:um|al)\w*",
             r"memory extension", r"speichererweiterung", r"configurations", r"konfigurationen")
 _CEILING_LANG = {"nl": (r"\btot\b",)}
 # Only the expansion target is a ceiling: "erweiterbar auf 1 TB", "auf 1 TB erweiterbar". The base
@@ -192,8 +192,11 @@ _EXPAND_BEFORE = re.compile(_EXPAND_WORD + r"(?:\s+(?:up to|to|auf|bis|jusqu.à|
 _EXPAND_AFTER = re.compile(r"\s*" + _EXPAND_WORD, re.I)
 # Word before an expansion target; English "to" always applies, the articles-looking "a"/"à" only in it/fr.
 _EXPAND_TO = {"de": r"auf", "fr": r"à|jusqu.à", "it": r"a|fino a", "nl": r"tot"}
-# Case-sensitive: "max." / "MAX." are abbreviations, "Pro Max." ends a sentence.
-_BOUNDARY = re.compile(r"(?<!\bmax)(?<!\bMAX)(?<!\bca)[.!?](?=\s|$)|\n|•|;")
+_BOUNDARY = re.compile(r"(?<!\bca)[.!?](?=\s|$)|\n|•|;")
+# "max. 120 Hz" / "Max. 144 Hz" / "MAX. 120 Hz": an abbreviation before a number, so no sentence end
+# (and a ceiling via _CEILING). "Pro Max. 256 GB" is a model name ending a sentence.
+_MAX_ABBREV = re.compile(r"(?<!\w)(?:max|Max|MAX)\.(?=\s*\d)")
+_MAX_MODEL = re.compile(r"\b(?:Pro|Ultra|Plus|Note|Mini|Fold|Edge)\s+$")
 _WINDOW = 40
 # Connector words a keyword absorbs on its right: "RAM: 8 GB", "refresh rate of 120 Hz".
 _CONNECT = re.compile(r"(?:\s*(?:[:=]|\b(?:rate|of|von|de|du|di|van)\b))*", re.I)
@@ -208,6 +211,9 @@ def _kw(group: str, lang: str) -> list[str]:
 def _sentence_span(text: str, pos: int) -> tuple[int, int]:
     start, end = 0, len(text)
     for m in _BOUNDARY.finditer(text):
+        a = m.start() - 3
+        if a >= 0 and _MAX_ABBREV.match(text, a) and not _MAX_MODEL.search(text, 0, a):
+            continue
         if m.end() <= pos:
             start = m.end()
         elif m.start() >= pos:
