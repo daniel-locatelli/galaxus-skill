@@ -109,10 +109,11 @@ def search(fetch: Fetch, lo: int = 1, hi: int = 1_000_000, max_calls: int = 60,
 
     try:
         _split(call, collect, fail, res, root)
+        # optional extras: an error or exception leaves the field None, status unchanged
         if (lo, hi) == FULL_RANGE and res.calls < max_calls:
-            res.unfiltered_total = call(None, None, 1).total
+            res.unfiltered_total = _count(call, None, None)
         if res.calls < max_calls:
-            res.final_total = call(lo, hi, 1).total
+            res.final_total = _count(call, lo, hi)
     except SearchFailed:
         raise
     except Exception as exc:  # any mid-run failure keeps the partial result
@@ -121,18 +122,40 @@ def search(fetch: Fetch, lo: int = 1, hi: int = 1_000_000, max_calls: int = 60,
     return res
 
 
+def _count(call, a, b) -> Optional[int]:
+    try:
+        page = call(a, b, 1)
+    except Exception:
+        return None
+    return None if page.error else page.total
+
+
 def _split(call, collect, fail, res: SearchResult, root: Page) -> None:
     pending = [(res.lo, res.hi, root)]
+    try:
+        _split_loop(call, collect, fail, res, pending)
+    except Exception:
+        # mid-run failure: the in-flight band and everything pending is unsearched
+        res.bands.extend(Band(a, b, None, "uncovered") for a, b, _ in pending)
+        res.bands.sort(key=lambda band: (band.lo, band.hi))
+        raise
+    res.bands.sort(key=lambda band: (band.lo, band.hi))
+    res.status = "complete" if all(band.status == "complete" for band in res.bands) else "partial"
+
+
+def _split_loop(call, collect, fail, res: SearchResult, pending: list) -> None:
     while pending:
-        a, b, page = pending.pop(0)
+        a, b, page = pending[0]  # stays in `pending` until handled, so a failure can report it
         if page is None:
             if res.calls >= res.max_calls:
                 res.bands.append(Band(a, b, None, "uncovered"))
+                pending.pop(0)
                 continue
             page = call(a, b)
             if page.error:
                 fail(page.error)
             collect(page)
+        pending.pop(0)
         can_split = b - a > 1 and res.calls < res.max_calls
         if page.total <= PAGE_SIZE and len(page.products) == page.total:
             res.bands.append(Band(a, b, page.total, "complete"))
@@ -145,8 +168,6 @@ def _split(call, collect, fail, res: SearchResult, root: Page) -> None:
             res.bands.append(Band(a, b, page.total, "capped"))
         else:
             res.bands.append(Band(a, b, page.total, "uncovered"))
-    res.bands.sort(key=lambda band: (band.lo, band.hi))
-    res.status = "complete" if all(band.status == "complete" for band in res.bands) else "partial"
 
 
 def _histogram(call, res: SearchResult) -> None:
@@ -158,8 +179,10 @@ def _histogram(call, res: SearchResult) -> None:
     for a, b in zip(edges, edges[1:]):
         try:
             page = call(a, b, 1)
-        except Exception:  # a histogram is a hint; stop on the first failure
+        except Exception as exc:  # a histogram is a hint; stop on the first failure
+            res.error = f"{type(exc).__name__}: {exc}"
             break
         if page.error:
+            res.error = page.error
             break
         res.histogram.append(Band(a, b, page.total, "histogram"))

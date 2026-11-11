@@ -116,7 +116,9 @@ def test_checkpoint_after_every_band_call():
     res = search(fake, lo=1, hi=1000, on_update=lambda r: snapshots.append(len(r.products)))
     assert snapshots == sorted(snapshots)
     assert snapshots[-1] == len(res.products) == 120
-    assert len(snapshots) >= 3
+    # one snapshot per band call (root included), one for the count-only recount
+    # (which does not collect), plus the final notify: calls == band calls + 1 recount
+    assert len(snapshots) == len(fake.calls)
 
 
 def test_error_message_mid_run_raises_with_partial():
@@ -157,3 +159,53 @@ def test_terminates_on_messy_catalogues(seed):
     res = search(catalogue(prices, seed=seed), max_calls=500)
     assert res.calls <= 500
     assert res.status in ("complete", "partial")
+    gaps = [b for b in res.bands if b.status != "complete"]
+    for pid, price in enumerate(prices, 1):
+        if not any(b.lo <= price <= b.hi for b in gaps):
+            assert pid in res.products
+
+
+def test_final_recount_error_leaves_final_total_none():
+    res = search(catalogue([10.0 + i for i in range(30)], error_on_call=2), lo=1, hi=1000)
+    assert res.status == "complete"
+    assert res.final_total is None
+
+
+def test_final_recount_exception_leaves_final_total_none():
+    res = search(catalogue([10.0 + i for i in range(30)], raise_on_call=2), lo=1, hi=1000)
+    assert res.status == "complete"
+    assert res.final_total is None
+
+
+def test_unfiltered_total_error_leaves_none():
+    res = search(catalogue([10.0 + i for i in range(30)], error_on_call=2))
+    assert res.status == "complete"
+    assert res.unfiltered_total is None
+
+
+def test_failure_partial_lists_unsearched_ranges():
+    fake = catalogue([float(p) for p in range(1, 281)], order="asc", error_on_call=5)
+    with pytest.raises(SearchFailed) as info:
+        search(fake, lo=1, hi=1000)
+    bands = info.value.partial.bands
+    assert [b.lo for b in bands] == sorted(b.lo for b in bands)
+    assert any(b.status == "uncovered" and b.count is None for b in bands)
+    covered = 1
+    for b in bands:
+        assert b.lo <= covered
+        covered = max(covered, b.hi)
+    assert covered == 1000
+
+
+def test_histogram_error_is_recorded_but_status_stays_infeasible():
+    n = []
+
+    def huge(lo, hi, first):
+        n.append(1)
+        if len(n) == 3:
+            return Page(total=0, products=[], error="boom")
+        return Page(total=471_800, products=[make_product(i, 100.0 + i) for i in range(50)])
+
+    res = search(huge)
+    assert res.status == "infeasible"
+    assert res.error == "boom"
