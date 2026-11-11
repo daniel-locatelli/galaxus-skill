@@ -1,5 +1,6 @@
 {
   "name": "galaxus-skill",
+  "description": "Exhaustive Galaxus product search skill with coverage reporting.",
   "owner": { "name": "Daniel Locatelli" },
   "plugins": [
     {

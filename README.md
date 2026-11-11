@@ -1,8 +1,8 @@
 # galaxus-skill
 
 An agent skill for **exhaustive** product search on [Galaxus](https://www.galaxus.ch)
-through its official MCP endpoint (`https://mcp.galaxus.ch/`, announced
-2026-11-11: <https://www.galaxus.ch/en/page/galaxus-introduces-mcp-interface-for-ai-assistants-44216>).
+through its official MCP endpoint (`https://mcp.galaxus.ch/`, see the announcement (link from the design spec):
+<https://www.galaxus.ch/en/page/galaxus-introduces-mcp-interface-for-ai-assistants-44216>).
 
 Status: version 0.1.0, local development. The repository is not published yet;
 the GitHub URL below is the planned one.
@@ -29,8 +29,18 @@ Planned repository: `daniel-locatelli/galaxus-skill` on GitHub (not live yet).
     /plugin marketplace add daniel-locatelli/galaxus-skill
     /plugin install galaxus@galaxus-skill
 
-or copy `skills/galaxus/` to `~/.claude/skills/galaxus/`. Until the repository
-is published, add the local checkout as the marketplace instead.
+or, from a shell:
+
+    claude plugin marketplace add daniel-locatelli/galaxus-skill
+    claude plugin install galaxus@galaxus-skill
+
+Until the repository is published, add the local checkout as the marketplace:
+
+    /plugin marketplace add <path to checkout>
+    /plugin install galaxus@galaxus-skill
+
+Alternatively copy `skills/galaxus/` to `~/.claude/skills/galaxus/`; it is then
+a standalone skill invoked as `/galaxus`.
 
 Optional, only for the manual fallback (when Python cannot run):
 
@@ -53,9 +63,9 @@ tested with other clients.
 ## Requirements
 
 Python 3.10 or newer, standard library only. The skill tries `python3`, then
-`py`, then `python`. Output is UTF-8. Searching needs network access to
-`mcp.galaxus.ch`; `filter` and `compare --ids` on a saved file work offline
-(`compare --lookup` and `search`/`count` need network).
+`py`, then `python`. Output is UTF-8. `count`, `search` and `compare --lookup`
+need network access to `mcp.galaxus.ch`; `filter` and `compare --ids` read a
+saved file.
 
 ## Use
 

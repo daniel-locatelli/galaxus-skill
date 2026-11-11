@@ -28,6 +28,17 @@ matches.
    "Redmi 17" matches about 290 phone covers at CHF 19-23, more than 50 in a
    1-CHF band, which integer price bounds cannot split. Expect `partial` with
    capped bands.
+6. Manual path: run in a session where Python cannot run (or the script
+   exits 2) and only the `search_products` MCP tool is available. Prompt:
+   "Find a Samsung smartphone between 250 and 300 CHF on Galaxus."
+7. Failure path: "Search Galaxus for x." A single-character query is answered
+   by the server with `errorMessage` (seen 2026-11-11 for "x"; may change).
+
+The failed / `errorMessage` path cannot be triggered reliably live. It is
+covered offline by `tests/test_cli.py`:
+`test_root_error_message_exits_4`,
+`test_error_message_mid_run_exits_4_with_checkpoint`,
+`test_tool_input_error_exits_3`. Case 7 is an optional live spot check.
 
 ## Pass criteria (all must hold unless a case says otherwise)
 
@@ -37,9 +48,9 @@ matches.
   unknown specs. A "none qualify" claim needs complete coverage and known
   specs for every candidate.
 - No spec tokens in the query ("17", "144", "Android 17" as query text),
-  except where the user names a model (case 5).
+  except where the user names a model (cases 3 and 5, see their notes).
 - Case 1: matches use the script's `filter`; products with unknown OS or RAM
-  are listed as candidates, not dropped.
+  are listed as candidates, not dropped (n/a if none are unknown).
 - Case 2: the answer reports how many products had unknown refresh rate.
 - Case 3: the answer reports infeasibility (or partial coverage) and offers
   ways to narrow (brand, price range) instead of listing a few products.
@@ -49,12 +60,26 @@ matches.
   histogram, and does not list a handful of products as "every smartphone".
 - Case 5: the answer reports capped bands and that coverage is partial; it
   tells the user which range was not fully searched.
+- Case 6: every call passes `agentInfo` naming the skill and host; the
+  answer says "availability and discounts: not available on this path"; any
+  call whose payload has `errorMessage` is treated as a failed search; the
+  coverage line (unique ids vs root `totalCount`, status) is reported; the
+  budget is 20 calls.
+- Case 7: reported as a failed search, not zero results.
 - Availability classes, if shown, are raw and labelled as an undocumented
   field; discounts and availability are not claimed on the manual path.
 - Without the skill, note what the baseline did (typically 1 call, no
   coverage statement) for comparison; baseline failures are expected.
 
+## Check by hand
+
+For any "found" or "none" claim, check galaxus.ch by hand and record it here
+(date, case, what the site shows, agrees with the answer yes/no).
+
+| Date | Case | Site shows | Agrees |
+|---|---|---|---|
+
 ## Results
 
-| Date | Case | Skill | Run | Coverage line | No false "none" | No spec tokens | Found | Notes |
-|---|---|---|---|---|---|---|---|---|
+| Date | Case | Skill | Run | Coverage line | No false "none" | No spec tokens | Found | Checked by hand | Notes |
+|---|---|---|---|---|---|---|---|---|---|
