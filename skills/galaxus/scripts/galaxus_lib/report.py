@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 
 from . import specs
-from .variants import merge_variants
+from .variants import is_refurbished, merge_variants
 
 FOOTNOTE = ("* availability class and discount: per Galaxus data (undocumented field); classes are shown raw, "
             "with no assumed meaning. Spec marks: (desc.) = from the free-text description, weaker than "
@@ -85,10 +85,14 @@ def coverage_lines(doc: dict) -> list[str]:
             lines.append("Price histogram (CHF range: matches):")
             lines += [f"  {b['lo']}-{b['hi']}: {_count(b['count'])}" for b in doc["histogram"]]
     elif status == "complete":
-        lines.append(f"Coverage: complete. {n} unique products found; Galaxus reports {_count(total)} for this "
-                     f"query and price range ({calls} calls).")
+        if _num(total) is None:
+            lines.append(f"Coverage: complete. {n} unique products found; Galaxus did not report a total for "
+                         f"this query and price range ({calls} calls).")
+        else:
+            lines.append(f"Coverage: complete. {n} unique products found; Galaxus reports {_count(total)} for "
+                         f"this query and price range ({calls} calls).")
     elif status == "failed":
-        lines.append(f"Coverage: failed. Galaxus search error: {doc['error']}. {n} unique products found before "
+        lines.append(f"Coverage: failed. Galaxus search error: {doc.get('error') or 'the server gave no message'}. {n} unique products found before "
                      f"the failure; treat this as a failed search, not as zero results.")
     else:
         word = "partial" if status == "partial" else "in progress"
@@ -105,11 +109,20 @@ def coverage_lines(doc: dict) -> list[str]:
     final, unfiltered = _num(doc.get("finalTotal")), _num(doc.get("unfilteredTotal"))
     total_n = _num(total)
     if final is not None and total_n is not None and final != total_n:
-        lines.append(f"Note: the Galaxus count moved from {total} to {final} during the run; "
+        lines.append(f"Note: the Galaxus count moved from {_count(total)} to {_count(final)} during the run; "
                      f"coverage numbers carry that tolerance.")
     if unfiltered is not None and total_n is not None and unfiltered > total_n:
         lines.append(f"Note: {unfiltered - total_n} matches have no price of at least 1 CHF and cannot be "
                      f"reached by price bands.")
+    if status == "complete":
+        if _num(total) is not None and n != total:
+            lines.append(f"Note: {n} unique products found but Galaxus reports {_count(total)}; "
+                         f"the difference is not explained by the bands.")
+        if final is None:
+            lines.append("Note: drift check not run (the final re-count did not complete), so the count may "
+                         "have changed during the run.")
+        if unfiltered is None and list(doc.get("range") or []) == [1, 1_000_000]:
+            lines.append("Note: products without a price not counted (the unfiltered total was not available).")
     if doc.get("correctedSearchTerm"):
         lines.append(f'Note: Galaxus spell-corrected the query to "{doc["correctedSearchTerm"]}".')
     return lines
@@ -135,24 +148,42 @@ def _specs_of(p: dict) -> dict:
     return p.get("specs") or {}
 
 
+def _mark_key(spec: dict) -> tuple:
+    return (str(spec.get("value")), spec.get("state"), spec.get("source"), bool(spec.get("ceiling")),
+            spec.get("conflict"))
+
+
+def _distinct_specs(group: list[dict], field: str) -> list[dict]:
+    """Distinct non-empty specs of one field; equal only if value and marks match."""
+    seen: dict[tuple, dict] = {}
+    for p in group:
+        s = _specs_of(p).get(field)
+        if s and s.get("value") not in (None, ""):
+            seen.setdefault(_mark_key(s), s)
+    return list(seen.values())
+
+
 def _variant_differences(group: list[dict]) -> str:
     if len(group) < 2:
         return ""
     out = []
     for field in _VARIANT_FIELDS:
-        vals = [v for v in dict.fromkeys(str((_specs_of(p).get(field) or {}).get("value") or "") for p in group)
-                if v]
-        if len(vals) < 2:
-            continue
+        found = _distinct_specs(group, field)
         if field == "colour":
-            out.append(f"{len(vals)} colours")
+            n = len({str(s["value"]) for s in found})
+            if n >= 2:
+                out.append(f"{n} colours")
             continue
+        if len(found) < 2:
+            continue
+        rendered = [render_spec(s) for s in found]
+        vals = [str(s["value"]) for s in found]
         units = {v.split(" ", 1)[1] if " " in v else "" for v in vals}
-        if len(units) == 1 and "" not in units:
+        if rendered == vals and len(set(vals)) == len(vals) and len(units) == 1 and "" not in units:
             ordered = sorted(vals, key=lambda v: specs.first_number(v) or 0)
             out.append("/".join(v.split(" ", 1)[0] for v in ordered) + " " + units.pop())
         else:
-            out.append("/".join(vals))
+            out.append("/".join(rendered))
     return "; ".join(out)
 
 
@@ -161,14 +192,12 @@ def _key_specs(group: list[dict]) -> str:
     parts = []
     for field in KEY_FIELDS.get(schema, ()):
         label = LABELS.get(field, field)
-        all_values = [_specs_of(p).get(field) for p in group]
-        known = [v for v in all_values if v]
-        if not known:
+        found = _distinct_specs(group, field)
+        if not found:
             parts.append(f"{label} ?")
             continue
-        distinct = list(dict.fromkeys(str(k["value"]) for k in known))
-        text = render_spec(known[0]) if len(distinct) == 1 else "/".join(distinct)
-        if len(known) < len(all_values):
+        text = "/".join(render_spec(s) for s in found)
+        if sum(1 for p in group if _specs_of(p).get(field)) < len(group):
             text += " (some variants)"
         parts.append(f"{label} {text}")
     return ", ".join(parts)
@@ -201,20 +230,19 @@ def _availability(group: list[dict]) -> str:
 
 
 def _discount(group: list[dict]) -> str:
-    for p in sorted(group, key=_price_key):
+    def rebate(p):
         instead = _extras(p).get("insteadOf")
-        if isinstance(instead, dict) and instead.get("rebate") is not None:
-            return f"-{format_price(instead['rebate'])} CHF, was {format_price(instead.get('price'))}*"
-    return ""
+        return instead if isinstance(instead, dict) and instead.get("rebate") is not None else None
+    having = [p for p in sorted(group, key=_price_key) if rebate(p)]
+    if not having:
+        return ""
+    instead = rebate(having[0])
+    text = f"-{format_price(instead['rebate'])} CHF, was {format_price(instead.get('price'))}*"
+    return text + " (some variants)" if len(having) < len(group) else text
 
 
 def _refurbished(group: list[dict]) -> str:
-    for p in group:
-        labels = _extras(p).get("labels")
-        if "offertype=refurbished" in (p.get("pageUrl") or "") or \
-                (isinstance(labels, (list, tuple)) and "USED_AND_CHECKED" in labels):
-            return "refurbished/used offer"
-    return ""
+    return "refurbished/used offer" if any(is_refurbished(p) for p in group) else ""
 
 
 def format_row(group: list[dict]) -> str:

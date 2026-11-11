@@ -137,3 +137,67 @@ def test_row_tolerates_unvalidated_extras():
                    "insteadOf": {"type": 1, "rebate": "8", "price": None}}
     row = report.format_row([p])
     assert "availability 3*" in row
+
+
+# ---------------------------------------------------------------- fix round 1
+
+def _ram(value, state="stated", source="properties", ceiling=False, conflict=None):
+    return {"value": value, "state": state, "source": source, "ceiling": ceiling, "conflict": conflict}
+
+
+def _pair(spec_a, spec_b, field="ram"):
+    a, b = redmi(1, 164, "128 GB", "Blue"), redmi(2, 187, "128 GB", "Blue")
+    a["specs"] = dict(a["specs"], **{field: spec_a})
+    b["specs"] = dict(b["specs"], **{field: spec_b})
+    return [a, b]
+
+
+def test_key_specs_keep_each_variants_marks():
+    row = report.format_row(_pair(_ram("8 GB"), _ram("8 GB", "inferred", "description", True)))
+    assert "RAM 8 GB/up to 8 GB (inferred)" in row
+
+
+def test_key_specs_show_conflict_on_any_variant():
+    row = report.format_row(_pair(_ram("8 GB"), _ram("8 GB", conflict="description says 4 GB")))
+    assert "conflict: description says 4 GB" in row
+
+
+def test_variant_differences_keep_ceiling_mark():
+    row = report.format_row(_pair(_ram("8 GB"), _ram("12 GB", "stated", "description", True)))
+    assert "up to 12 GB" in row
+
+
+def test_complete_without_caveats_notes_missing_checks():
+    text = "\n".join(report.coverage_lines(doc([with_specs(make_product(1, 10.0))])))
+    assert "drift check not run" in text
+    assert "products without a price not counted" in text
+    sub = "\n".join(report.coverage_lines(doc([with_specs(make_product(1, 10.0))], range=[10, 500])))
+    assert "drift check not run" in sub and "without a price" not in sub
+
+
+def test_complete_with_unknown_total_is_phrased_clearly():
+    line = report.coverage_lines(doc([], rootTotal=None, finalTotal=0, unfilteredTotal=0))[0]
+    assert "unknown" not in line and "did not report a total" in line
+
+
+def test_complete_count_mismatch_is_stated():
+    d = doc([with_specs(make_product(1, 10.0))], rootTotal=3, finalTotal=3, unfilteredTotal=3)
+    text = "\n".join(report.coverage_lines(d))
+    assert "1 unique products found but Galaxus reports 3" in text
+
+
+def test_refurbished_and_new_do_not_merge():
+    new = with_specs(make_product(1, 100.0, name="Same", description="d"))
+    used = with_specs(make_product(2, 80.0, name="Same", description="d"))
+    used["pageUrl"] += "?offertype=refurbished"
+    assert [len(g) for g in merge_variants([new, used])] == [1, 1]
+
+
+def test_failed_without_message_and_count_formatting_and_partial_discount():
+    t = "\n".join(report.coverage_lines(doc([], status="failed", error=None)))
+    assert "None" not in t and "no message" in t
+    t = "\n".join(report.coverage_lines(doc([], rootTotal=1500, finalTotal=1600)))
+    assert "moved from 1,500 to 1,600" in t
+    a, b = redmi(1, 164, "256 GB", "Blue"), redmi(2, 187, "128 GB", "Black")
+    a["extras"] = {"insteadOf": {"rebate": 8, "price": 178}}
+    assert "was 178* (some variants)" in report.format_row([a, b])
