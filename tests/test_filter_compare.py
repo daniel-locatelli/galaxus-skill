@@ -173,24 +173,24 @@ def test_lookup_enriches_specs_for_the_table():
 # ---- fixes A: weight units, network, ceilings with <=
 
 @pytest.mark.parametrize("cond, s, expected", [
-    ("weight<=1500", spec("1400 g"), "match"),
-    ("weight<=1.5", spec("1400 g"), "fail"),  # bare numbers are grams
-    ("weight<=1500", spec("1.4 kg"), "match"),
+    ("weight<=1500g", spec("1400 g"), "match"),
+    ("weight<=1500g", spec("1.4 kg"), "match"),
     ("weight<=1.5kg", spec("1400 g"), "match"),
     ("weight<=1500g", spec("1.6 kg"), "fail"),
     ("weight<=1.5kg", spec("1.6 kg"), "fail"),
-    ("weight>=150", spec("190 g"), "match"),
-    ("weight<=1500", spec("3 lb"), "unknown"),
-    ("weight<=1500", spec("heavy"), "unknown"),
-    ("weight=190", spec("190 g"), "match"),
+    ("weight>=150g", spec("190 g"), "match"),
+    ("weight<=1500g", spec("3 lb"), "unknown"),
+    ("weight<=1500g", spec("heavy"), "unknown"),
+    ("weight=190g", spec("190 g"), "match"),
 ])
 def test_weight_is_compared_in_grams(cond, s, expected):
     assert filtering.evaluate(filtering.parse_where(cond), s) == expected
 
 
-def test_weight_condition_with_bad_unit_is_rejected():
-    with pytest.raises(ValueError):
-        filtering.parse_where("weight<=2lb")
+@pytest.mark.parametrize("bad", ["weight<=1.5", "weight>=1500", "weight=190", "weight<=2lb"])
+def test_weight_condition_requires_g_or_kg(bad):
+    with pytest.raises(ValueError, match="weight needs a unit"):
+        filtering.parse_where(bad)
 
 
 @pytest.mark.parametrize("cond, s, expected", [

@@ -74,9 +74,9 @@ def parse_where(expr: str) -> Condition:
                 raise ValueError(f"unknown field {name!r}; valid fields: {', '.join(specs.FIELD_ORDER)}")
             if op != "~" and _COMMA_NUMBER.fullmatch(value):
                 value = value.replace(",", ".")
-            if op in (">=", "<=") and name == "weight":
-                if _weight_grams(value, False) is None:
-                    raise ValueError(f"{usage}; weight needs a number in grams or with a g/kg unit")
+            if op != "~" and name == "weight":
+                if _weight_grams(value, True) is None:
+                    raise ValueError("weight needs a unit, e.g. weight<=1.5kg or weight<=1500g")
             elif op in (">=", "<=") and _as_float(value) is None:
                 raise ValueError(f"{usage}; {op} needs a finite number")
             return Condition(name, op, value)
@@ -100,7 +100,7 @@ def evaluate(cond: Condition, spec: dict | None) -> str:
         number = _number(cond, value)
         if number is None:
             return UNKNOWN
-        want = _weight_grams(cond.value, False) if cond.field == "weight" else float(cond.value)
+        want = _weight_grams(cond.value, True) if cond.field == "weight" else float(cond.value)
         if want is None:
             return UNKNOWN
         ok = number >= want if cond.op == ">=" else number <= want
@@ -114,7 +114,7 @@ def evaluate(cond: Condition, spec: dict | None) -> str:
     if cond.op == "=":
         if cond.field == "network":
             return MATCH if _network(value) == _network(cond.value) else FAIL
-        want_number = _weight_grams(cond.value, False) if cond.field == "weight" else _as_float(cond.value)
+        want_number = _weight_grams(cond.value, True) if cond.field == "weight" else _as_float(cond.value)
         if want_number is not None:
             number = _number(cond, value)
             if number is None:
